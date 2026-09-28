@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-brand: #7b1e2b;
+  --color-brand-dark: #5e1520;
+  --color-brand-soft: #f7e9eb;
+  --color-ink: #1f1f1f;
+  --color-cream: #fff2cc;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: #f6f6f4;
+  color: #1f1f1f;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-neutral-200 bg-white shadow-sm;
+  }
+  .card-h {
+    @apply flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-3;
+  }
+  .card-t {
+    @apply text-sm font-semibold uppercase tracking-wide text-neutral-700;
+  }
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-brand text-white hover:bg-brand-dark;
+  }
+  .btn-secondary {
+    @apply border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-50;
+  }
+  .btn-danger {
+    @apply border border-red-200 bg-white text-red-700 hover:bg-red-50;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+  .input {
+    @apply w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:bg-neutral-100;
+  }
+  .input-sm {
+    @apply rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:bg-neutral-100;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium text-neutral-600;
+  }
+  .tbl {
+    @apply w-full text-sm;
+  }
+  .tbl thead th {
+    @apply bg-brand px-3 py-2 text-left text-xs font-semibold whitespace-nowrap text-white;
+  }
+  .tbl tbody td {
+    @apply border-b border-neutral-100 px-3 py-2 align-middle;
+  }
+  .tbl tbody tr:hover td {
+    @apply bg-neutral-50;
+  }
+  .tbl tfoot td {
+    @apply bg-cream px-3 py-2 font-semibold;
+  }
+  .num {
+    @apply text-right tabular-nums whitespace-nowrap;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap;
+  }
+}

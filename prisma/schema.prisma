@@ -1,0 +1,410 @@
+// Gen Clover Portal — data model
+// Source of truth for defaults: ../docs/Gen-Clover-Rate-Card-2026.md (seeded via prisma/seed.ts)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Role: ADMIN | EDITOR | VIEWER
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         String     @default("VIEWER")
+  active       Boolean    @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  auditLogs    AuditLog[]
+  projects     Project[]
+}
+
+/// Editable formula parameters (FX, hours, load factor, floor rule, packages...)
+model Setting {
+  key         String   @id
+  value       String
+  label       String
+  group       String
+  type        String   @default("number") // number | text
+  unit        String?
+  description String?
+  sortOrder   Int      @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+/// Revenue allocation buckets (65 / 10 / 25 model). Must total 100%.
+model AllocationBucket {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  name        String
+  percent     Float
+  category    String // DELIVERY | GROWTH | CORPORATE
+  isProfit    Boolean @default(false)
+  description String?
+  sortOrder   Int     @default(0)
+}
+
+/// Rate card (one row per role / domain)
+model RoleRate {
+  id           String            @id @default(cuid())
+  name         String            @unique
+  family       String
+  marketMin    Float
+  marketMax    Float
+  usSalary     Float
+  standardRate Float
+  floorRate    Float? // null = computed by floor rule
+  ctcMinL      Float? // India CTC, ₹ lakh / yr
+  ctcMaxL      Float?
+  notes        String?
+  active       Boolean           @default(true)
+  sortOrder    Int               @default(0)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  resources    ProjectResource[]
+  people       Person[]
+}
+
+model Client {
+  id             String    @id @default(cuid())
+  name           String
+  contactName    String?
+  email          String?
+  phone          String?
+  country        String?   @default("USA")
+  city           String?
+  timezone       String?
+  website        String?
+  billingAddress String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  projects       Project[]
+  invoices       Invoice[]
+}
+
+/// status: DRAFT | QUOTED | NEGOTIATION | ACTIVE | ON_HOLD | COMPLETED | CANCELLED
+/// engagementModel: TM | RETAINER | BLENDED | FIXED
+model Project {
+  id                 String            @id @default(cuid())
+  code               String            @unique
+  name               String
+  clientId           String
+  client             Client            @relation(fields: [clientId], references: [id])
+  status             String            @default("DRAFT")
+  engagementModel    String            @default("TM")
+  startDate          DateTime?
+  endDate            DateTime?
+  description        String?
+  // Sales pipeline (Draft / Quoted / Negotiation)
+  probability        Int? // % chance of closing
+  expectedCloseDate  DateTime?
+  // Agreement (what was finally agreed with the client)
+  agreedAt           DateTime?
+  agreedMonthly      Float? // RETAINER / FIXED monthly amount
+  agreedBlendedRate  Float? // BLENDED
+  agreedRetainerHrs  Float? // RETAINER included hours
+  agreedExtraRate    Float? // RETAINER additional hours rate
+  agreementNotes     String?
+  // JSON snapshot of allocation buckets at creation (rate-card changes don't rewrite history)
+  allocationSnapshot String
+  createdById        String?
+  createdBy          User?             @relation(fields: [createdById], references: [id])
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  resources          ProjectResource[]
+  months             MonthlyRecord[]
+  milestones         Milestone[]
+  assignments        Assignment[]
+  timeEntries        TimeEntry[]
+  expenses           Expense[]
+  invoices           Invoice[]
+}
+
+/// tier: STANDARD | FLOOR | PREMIUM | CUSTOM
+model ProjectResource {
+  id            String        @id @default(cuid())
+  projectId     String
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  roleId        String?
+  role          RoleRate?     @relation(fields: [roleId], references: [id])
+  label         String
+  headcount     Int           @default(1)
+  hoursPerMonth Float
+  tier          String        @default("STANDARD")
+  quotedRate    Float
+  agreedRate    Float?
+  standardRate  Float // snapshot
+  floorRate     Float // snapshot
+  sortOrder     Int           @default(0)
+  lines         MonthlyLine[]
+  assignments   Assignment[]
+}
+
+/// status: DRAFT | INVOICED | PAID — synced from the linked invoice
+model MonthlyRecord {
+  id         String        @id @default(cuid())
+  projectId  String
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  month      String // YYYY-MM
+  status     String        @default("DRAFT")
+  hours      Float         @default(0) // computed on save
+  revenue    Float         @default(0) // computed on save
+  adjustment Float         @default(0)
+  invoiceId  String?
+  invoice    Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  notes      String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  lines      MonthlyLine[]
+
+  @@unique([projectId, month])
+}
+
+model MonthlyLine {
+  id         String           @id @default(cuid())
+  recordId   String
+  record     MonthlyRecord    @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  resourceId String?
+  resource   ProjectResource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  label      String
+  hours      Float
+  rate       Float
+}
+
+// ---------- Team & delivery ----------
+
+/// type: EMPLOYEE | CONTRACTOR · costBasis: MONTHLY (₹ per month, e.g. CTC ÷ 12) | HOURLY (₹ per hour)
+model Person {
+  id               String       @id @default(cuid())
+  name             String
+  email            String?
+  title            String?
+  type             String       @default("EMPLOYEE")
+  roleId           String?
+  role             RoleRate?    @relation(fields: [roleId], references: [id])
+  costBasis        String       @default("MONTHLY")
+  costInr          Float        @default(0)
+  stdHoursPerMonth Float        @default(160)
+  startDate        DateTime?
+  endDate          DateTime?
+  nextReviewDate   DateTime? // salary review / hike due
+  active           Boolean      @default(true)
+  notes            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  assignments      Assignment[]
+  timeEntries      TimeEntry[]
+  milestones       Milestone[]
+  expenses         Expense[]
+}
+
+/// A person staffed on a project, optionally against one resource line of the quote.
+model Assignment {
+  id            String           @id @default(cuid())
+  projectId     String
+  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  personId      String
+  person        Person           @relation(fields: [personId], references: [id], onDelete: Cascade)
+  resourceId    String?
+  resource      ProjectResource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  hoursPerMonth Float            @default(0)
+  billable      Boolean          @default(true)
+
+  @@unique([projectId, personId])
+}
+
+/// status: PLANNED | IN_PROGRESS | DONE | BLOCKED
+model Milestone {
+  id          String    @id @default(cuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  notes       String?
+  ownerId     String?
+  owner       Person?   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  dueDate     DateTime?
+  status      String    @default("PLANNED")
+  completedAt DateTime?
+  sortOrder   Int       @default(0)
+}
+
+/// One person, one project, one day. costRateInr is snapshotted so salary changes never rewrite history.
+model TimeEntry {
+  id          String   @id @default(cuid())
+  personId    String
+  person      Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  date        DateTime
+  hours       Float
+  billable    Boolean  @default(true)
+  costRateInr Float    @default(0)
+  createdAt   DateTime @default(now())
+
+  @@unique([personId, projectId, date, billable])
+  @@index([projectId, date])
+}
+
+// ---------- Finance (books in ₹, client billing in US$) ----------
+
+/// bucketKey links spend to an AllocationBucket (budget vs actual). null = client pass-through (outside the 65/10/25 model).
+model ExpenseCategory {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  bucketKey String?
+  active    Boolean   @default(true)
+  sortOrder Int       @default(0)
+  expenses  Expense[]
+}
+
+/// currency: INR | USD. amountInr = amount × fxRate (fxRate 1 for INR). paidOn null = unpaid (payable).
+model Expense {
+  id           String          @id @default(cuid())
+  date         DateTime
+  vendor       String
+  description  String?
+  categoryId   String
+  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
+  currency     String          @default("INR")
+  amount       Float
+  fxRate       Float           @default(1)
+  amountInr    Float
+  gstInr       Float           @default(0) // input GST, tracked apart from cost
+  projectId    String?
+  project      Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  personId     String?
+  person       Person?         @relation(fields: [personId], references: [id], onDelete: SetNull)
+  payrollMonth String? // YYYY-MM when generated by a payroll run
+  passThrough  Boolean         @default(false) // re-billable to the client at cost
+  paidOn       DateTime?
+  reference    String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  invoiceLine  InvoiceLine?
+
+  @@index([date])
+}
+
+/// status: DRAFT | SENT | PARTIAL | PAID | VOID. fxRate = ₹ per US$ used to book revenue on the issue date.
+model Invoice {
+  id        String          @id @default(cuid())
+  number    String          @unique
+  clientId  String
+  client    Client          @relation(fields: [clientId], references: [id])
+  projectId String?
+  project   Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  issueDate DateTime
+  dueDate   DateTime
+  currency  String          @default("USD")
+  fxRate    Float
+  status    String          @default("DRAFT")
+  total     Float           @default(0) // computed from lines on save
+  notes     String?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  lines     InvoiceLine[]
+  payments  Payment[]
+  months    MonthlyRecord[]
+}
+
+/// kind: SERVICES | PASS_THROUGH | OTHER
+model InvoiceLine {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  kind        String   @default("SERVICES")
+  description String
+  quantity    Float    @default(1)
+  unitPrice   Float
+  amount      Float
+  expenseId   String?  @unique
+  expense     Expense? @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  sortOrder   Int      @default(0)
+}
+
+/// amountUsd settles the invoice; inrReceived landed in the bank; bankChargesInr were deducted on the way.
+/// Realised FX gain/loss = inrReceived + bankChargesInr − amountUsd × invoice.fxRate
+model Payment {
+  id             String      @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  date           DateTime
+  amountUsd      Float
+  inrReceived    Float
+  bankChargesInr Float       @default(0)
+  reference      String?
+  createdAt      DateTime    @default(now())
+  fundEntries    FundEntry[]
+}
+
+// ---------- Treasury: funds, commitments, policies ----------
+
+/// Movements into / out of a fund (fundKey = AllocationBucket.key, or "passthrough" for client pass-through clearing).
+/// type: ALLOCATION (cash received, split by the active policy) | OPENING | TRANSFER | ADJUSTMENT.
+/// Paid expenses are debited on the fly from the Expense table, so edits there never go out of sync.
+model FundEntry {
+  id         String   @id @default(cuid())
+  date       DateTime
+  fundKey    String
+  amountInr  Float // + in, − out
+  type       String
+  paymentId  String?
+  payment    Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  transferId String? // pairs the two legs of a transfer
+  policy     String? // name of the allocation policy used
+  note       String?
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  @@index([fundKey, date])
+}
+
+/// Future obligations. frequency: ONE_OFF | MONTHLY | QUARTERLY | YEARLY.
+/// kind: CONTRACTOR | TAX | SUBSCRIPTION | RENT | LOAN | OTHER (payroll is derived from People).
+/// essential = counts toward monthly unavoidable burn (runway).
+model Commitment {
+  id          String    @id @default(cuid())
+  name        String
+  kind        String    @default("OTHER")
+  fundKey     String
+  amountInr   Float
+  frequency   String    @default("MONTHLY")
+  nextDueDate DateTime
+  endDate     DateTime?
+  essential   Boolean   @default(true)
+  active      Boolean   @default(true)
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+/// Allocation policy by company stage. allocations = JSON [{ key, percent }]. Activating one writes it to AllocationBucket.
+/// stage: STARTUP | GROWTH | MATURE | CUSTOM
+model FinancialPolicy {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  stage       String   @default("CUSTOM")
+  description String?
+  allocations String
+  active      Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName  String
+  action    String
+  entity    String
+  entityId  String?
+  summary   String
+  createdAt DateTime @default(now())
+}
