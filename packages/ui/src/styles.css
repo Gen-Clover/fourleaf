@@ -1,0 +1,299 @@
+/*
+ * Gen Clover theme, mirroring genclover.com: ink/silver neutrals, clover-red accent,
+ * Inter for text, Chakra Petch for display/eyebrows. Dark by default, light on toggle
+ * (<html data-theme="dark|light">, stored in localStorage "gc-theme").
+ *
+ * Existing utility classes keep working: the neutral, status and brand colours are
+ * re-pointed at theme tokens, so pages don't hard-code a mode.
+ */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------- Tokens (RGB triplets, same values as genclover.com) ---------- */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --ink-950: 5 5 6;
+  --ink-900: 10 10 12;
+  --ink-850: 15 15 18;
+  --ink-800: 20 20 24;
+  --ink-750: 26 26 31;
+  --ink-700: 35 35 41;
+  --ink-600: 46 46 54;
+  --ink-500: 102 102 111;
+  --silver-100: 245 246 248;
+  --silver-200: 219 221 226;
+  --silver-300: 182 186 195;
+  --silver-400: 154 160 169;
+  --silver-500: 135 140 149;
+  --silver-600: 123 128 138;
+  --accent-400: 239 78 84;
+  --accent-500: 224 31 38;
+  --accent-600: 193 21 27;
+  --accent-700: 156 17 22;
+  --grid-alpha: 0.025;
+  --glow-strength: 0.4;
+  --clover-1: #ffffff;
+  --clover-2: #d2d5dc;
+  --clover-3: #7e838c;
+
+  --page: var(--ink-950);
+  --surface: var(--ink-850);
+  --surface-raised: var(--ink-800);
+  --brand-fg: var(--accent-400);
+  --brand-hover: var(--accent-500);
+  --brand-soft: 224 31 38 / 0.12;
+
+  /* Neutral scale: low numbers are backgrounds, high numbers are text. */
+  --color-neutral-50: rgb(var(--ink-800));
+  --color-neutral-100: rgb(var(--ink-750));
+  --color-neutral-200: rgb(var(--ink-700));
+  --color-neutral-300: rgb(var(--ink-600));
+  --color-neutral-400: rgb(var(--silver-600));
+  --color-neutral-500: rgb(var(--silver-500));
+  --color-neutral-600: rgb(var(--silver-400));
+  --color-neutral-700: rgb(var(--silver-300));
+  --color-neutral-800: rgb(var(--silver-200));
+  --color-neutral-900: rgb(var(--silver-100));
+
+  /* Status colours: tinted backgrounds and lighter text on dark surfaces. */
+  --color-red-50: rgb(239 68 68 / 0.12);
+  --color-red-100: rgb(239 68 68 / 0.18);
+  --color-red-200: rgb(239 68 68 / 0.3);
+  --color-red-300: rgb(239 68 68 / 0.45);
+  --color-red-400: rgb(248 113 113);
+  --color-red-600: rgb(248 113 113);
+  --color-red-700: rgb(252 165 165);
+  --color-red-800: rgb(254 202 202);
+  --color-emerald-50: rgb(16 185 129 / 0.12);
+  --color-emerald-200: rgb(16 185 129 / 0.3);
+  --color-emerald-300: rgb(16 185 129 / 0.45);
+  --color-emerald-600: rgb(16 185 129);
+  --color-emerald-700: rgb(110 231 183);
+  --color-emerald-800: rgb(167 243 208);
+  --color-amber-50: rgb(245 158 11 / 0.12);
+  --color-amber-200: rgb(245 158 11 / 0.3);
+  --color-amber-300: rgb(245 158 11 / 0.45);
+  --color-amber-700: rgb(252 211 77);
+  --color-amber-800: rgb(253 230 138);
+  --color-blue-50: rgb(59 130 246 / 0.14);
+  --color-blue-700: rgb(147 197 253);
+  --color-blue-800: rgb(191 219 254);
+  --color-orange-50: rgb(249 115 22 / 0.12);
+  --color-orange-200: rgb(249 115 22 / 0.3);
+  --color-orange-300: rgb(249 115 22 / 0.45);
+  --color-orange-600: rgb(251 146 60);
+  --color-orange-700: rgb(253 186 116);
+  --color-orange-800: rgb(254 215 170);
+  --color-violet-50: rgb(139 92 246 / 0.14);
+  --color-violet-700: rgb(196 181 253);
+
+  --chart-axis: rgb(var(--silver-500));
+  --chart-grid: rgb(var(--ink-700));
+  --chart-surface: rgb(var(--ink-850));
+  --chart-cursor: rgb(255 255 255 / 0.04);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --ink-950: 255 255 255;
+  --ink-900: 244 246 248;
+  --ink-850: 255 255 255;
+  --ink-800: 231 234 238;
+  --ink-750: 223 227 233;
+  --ink-700: 213 218 225;
+  --ink-600: 194 200 209;
+  --ink-500: 142 149 160;
+  --silver-100: 11 12 14;
+  --silver-200: 29 32 36;
+  --silver-300: 52 56 64;
+  --silver-400: 76 82 91;
+  --silver-500: 90 96 106;
+  --silver-600: 101 108 118;
+  --accent-400: 179 18 24;
+  --accent-500: 168 18 23;
+  --accent-600: 193 21 27;
+  --accent-700: 142 17 23;
+  --grid-alpha: 0.045;
+  --glow-strength: 0.12;
+  --clover-1: #6b7280;
+  --clover-2: #464c55;
+  --clover-3: #23272e;
+
+  --page: var(--ink-900);
+  --surface: 255 255 255;
+  --surface-raised: var(--ink-900);
+  --brand-fg: var(--accent-600);
+  --brand-hover: var(--accent-500);
+  --brand-soft: 255 235 236;
+
+  --color-neutral-50: rgb(var(--ink-900));
+  --color-neutral-100: rgb(var(--ink-800));
+  --color-neutral-200: rgb(var(--ink-750));
+  --color-neutral-300: rgb(var(--ink-700));
+  --color-neutral-400: rgb(var(--ink-500));
+  --color-neutral-500: rgb(var(--silver-500));
+  --color-neutral-600: rgb(var(--silver-400));
+  --color-neutral-700: rgb(var(--silver-300));
+  --color-neutral-800: rgb(var(--silver-200));
+  --color-neutral-900: rgb(var(--silver-100));
+
+  /* Light mode uses Tailwind's own status colours: reset the dark overrides. */
+  --color-red-50: oklch(97.1% 0.013 17.38);
+  --color-red-100: oklch(93.6% 0.032 17.717);
+  --color-red-200: oklch(88.5% 0.062 18.334);
+  --color-red-300: oklch(80.8% 0.114 19.571);
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-red-600: oklch(57.7% 0.245 27.325);
+  --color-red-700: oklch(50.5% 0.213 27.518);
+  --color-red-800: oklch(44.4% 0.177 26.899);
+  --color-emerald-50: oklch(97.9% 0.021 166.113);
+  --color-emerald-200: oklch(90.5% 0.093 164.15);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-600: oklch(59.6% 0.145 163.225);
+  --color-emerald-700: oklch(50.8% 0.118 165.612);
+  --color-emerald-800: oklch(43.2% 0.095 166.913);
+  --color-amber-50: oklch(98.7% 0.022 95.277);
+  --color-amber-200: oklch(92.4% 0.12 95.746);
+  --color-amber-300: oklch(87.9% 0.169 91.605);
+  --color-amber-700: oklch(55.5% 0.163 48.998);
+  --color-amber-800: oklch(47.3% 0.137 46.201);
+  --color-blue-50: oklch(97% 0.014 254.604);
+  --color-blue-700: oklch(48.8% 0.243 264.376);
+  --color-blue-800: oklch(42.4% 0.199 265.638);
+  --color-orange-50: oklch(98% 0.016 73.684);
+  --color-orange-200: oklch(90.1% 0.076 70.697);
+  --color-orange-300: oklch(83.7% 0.128 66.29);
+  --color-orange-600: oklch(64.6% 0.222 41.116);
+  --color-orange-700: oklch(55.3% 0.195 38.402);
+  --color-orange-800: oklch(47% 0.157 37.304);
+  --color-violet-50: oklch(96.9% 0.016 293.756);
+  --color-violet-700: oklch(49.1% 0.27 292.581);
+
+  --chart-axis: rgb(var(--silver-500));
+  --chart-grid: rgb(var(--ink-750));
+  --chart-surface: rgb(255 255 255);
+  --chart-cursor: rgb(0 0 0 / 0.04);
+}
+
+/* ---------- Theme colours available as utilities (bg-surface, text-brand-fg, …) ---------- */
+
+@theme inline {
+  --color-page: rgb(var(--page));
+  --color-surface: rgb(var(--surface));
+  --color-surface-raised: rgb(var(--surface-raised));
+  --color-brand: rgb(var(--accent-600));
+  --color-brand-dark: rgb(var(--brand-hover));
+  --color-brand-fg: rgb(var(--brand-fg));
+  --color-brand-soft: rgb(var(--brand-soft));
+  --color-ink: rgb(var(--silver-100));
+  --color-cream: rgb(var(--surface-raised));
+  --color-accent-400: rgb(var(--accent-400));
+  --color-accent-500: rgb(var(--accent-500));
+  --color-accent-600: rgb(var(--accent-600));
+  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-chakra), "Chakra Petch", ui-sans-serif, system-ui, sans-serif;
+  --tracking-brand: 0.18em;
+  --tracking-eyebrow: 0.22em;
+}
+
+/* ---------- Base ---------- */
+
+@layer base {
+  body {
+    background-color: rgb(var(--page));
+    color: rgb(var(--silver-200));
+    font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+  ::selection {
+    background-color: rgb(var(--accent-600) / 0.4);
+    color: rgb(var(--silver-100));
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent-500));
+    outline-offset: 2px;
+  }
+}
+
+/* ---------- Components ---------- */
+
+@layer components {
+  /* Faint grid behind the content, as on genclover.com. */
+  .gc-grid {
+    background-image:
+      linear-gradient(rgb(128 128 128 / var(--grid-alpha)) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(128 128 128 / var(--grid-alpha)) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+  .eyebrow {
+    @apply font-display text-[11px] font-semibold tracking-eyebrow uppercase;
+    color: rgb(var(--accent-400));
+  }
+  .card {
+    @apply rounded-xl border border-neutral-200 bg-surface shadow-sm;
+  }
+  .card-h {
+    @apply flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-3;
+  }
+  .card-t {
+    @apply font-display text-xs font-semibold tracking-wider text-neutral-700 uppercase;
+  }
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-brand text-white hover:bg-brand-dark;
+    box-shadow: 0 0 20px -6px rgb(var(--accent-500) / var(--glow-strength));
+  }
+  .btn-secondary {
+    @apply border border-neutral-300 bg-surface text-neutral-800 hover:border-brand hover:text-brand-fg;
+  }
+  .btn-danger {
+    @apply border border-red-200 bg-surface text-red-700 hover:bg-red-50;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+  .input {
+    @apply w-full rounded-lg border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-brand focus:ring-2 focus:ring-brand/25 disabled:bg-neutral-100;
+  }
+  .input-sm {
+    @apply rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm text-neutral-900 outline-none focus:border-brand focus:ring-2 focus:ring-brand/25 disabled:bg-neutral-100;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium text-neutral-600;
+  }
+  .tbl {
+    @apply w-full text-sm;
+  }
+  .tbl thead th {
+    @apply border-b border-neutral-200 bg-neutral-50 px-3 py-2.5 text-left font-display text-[11px] font-semibold tracking-wider whitespace-nowrap text-neutral-600 uppercase;
+  }
+  .tbl tbody td {
+    @apply border-b border-neutral-100 px-3 py-2 align-middle;
+  }
+  .tbl tbody tr:hover td {
+    @apply bg-neutral-50;
+  }
+  .tbl tfoot td {
+    @apply border-t border-neutral-200 bg-cream px-3 py-2 font-semibold text-neutral-900;
+  }
+  .num {
+    @apply text-right whitespace-nowrap tabular-nums;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap;
+  }
+}

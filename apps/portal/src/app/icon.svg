@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Gen Clover tab icon: the clover mark from src/components/brand/Logo.jsx on the brand's dark tile -->
+  <defs>
+    <linearGradient id="silver" x1="0.1" y1="0" x2="0.75" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="50%" stop-color="#D2D5DC"/>
+      <stop offset="100%" stop-color="#7E838C"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0.1" y1="0" x2="0.75" y2="1">
+      <stop offset="0%" stop-color="#FF5F64"/>
+      <stop offset="50%" stop-color="#E01F26"/>
+      <stop offset="100%" stop-color="#8E0F14"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.46" r="0.5">
+      <stop offset="0%" stop-color="#E01F26" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#E01F26" stop-opacity="0"/>
+    </radialGradient>
+    <path id="petal" d="M0 0 C -20 -10, -34 -26, -28 -41 C -22 -56, 22 -56, 28 -41 C 34 -26, 20 -10, 0 0 Z"/>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0B0B0E"/>
+  <rect width="64" height="64" rx="14" fill="url(#glow)"/>
+  <g transform="translate(32 32) scale(0.5) rotate(45)">
+    <use href="#petal" fill="url(#accent)"/>
+    <use href="#petal" fill="url(#silver)" transform="rotate(90)"/>
+    <use href="#petal" fill="url(#silver)" transform="rotate(180)"/>
+    <use href="#petal" fill="url(#silver)" transform="rotate(270)"/>
+  </g>
+</svg>

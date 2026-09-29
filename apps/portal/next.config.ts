@@ -8,6 +8,19 @@ try {
   // No .env file: rely on the environment (production hosts).
 }
 
-const nextConfig: NextConfig = {};
+const repoRoot = path.resolve(__dirname, "../..");
+
+const nextConfig: NextConfig = {
+  // Tools and shared packages are TypeScript source in the workspace: compile them with the app.
+  transpilePackages: ["@genclover/auth", "@genclover/db", "@genclover/finance", "@genclover/ui"],
+  // Prisma's engine must stay a runtime dependency, not be bundled.
+  serverExternalPackages: ["@prisma/client", ".prisma/client"],
+  outputFileTracingRoot: repoRoot,
+  turbopack: { root: repoRoot },
+  experimental: {
+    // Only load the parts of big libraries a page actually uses (faster dev compiles and smaller bundles).
+    optimizePackageImports: ["recharts"],
+  },
+};
 
 export default nextConfig;

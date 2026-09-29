@@ -1,46 +1,9 @@
-// Gen Clover Portal — data model
-// Source of truth for defaults: ../docs/Gen-Clover-Rate-Card-2026.md (seeded via prisma/seed.ts)
-
-generator client {
-  provider = "prisma-client-js"
-}
-
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
-}
-
-/// Role: ADMIN | EDITOR | VIEWER
-model User {
-  id           String     @id @default(cuid())
-  name         String
-  email        String     @unique
-  passwordHash String
-  role         String     @default("VIEWER")
-  active       Boolean    @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  auditLogs    AuditLog[]
-  projects     Project[]
-}
-
-/// Editable formula parameters (FX, hours, load factor, floor rule, packages...)
-model Setting {
-  key         String   @id
-  value       String
-  label       String
-  group       String
-  type        String   @default("number") // number | text
-  unit        String?
-  description String?
-  sortOrder   Int      @default(0)
-  updatedAt   DateTime @updatedAt
-}
+// Finance tool: rate card, projects, delivery, invoicing, expenses, treasury.
+// Defaults come from docs/finance/Gen-Clover-Rate-Card-2026.md (seeded via prisma/seed.ts).
 
 /// Revenue allocation buckets (65 / 10 / 25 model). Must total 100%.
 model AllocationBucket {
-  id          String  @id @default(cuid())
+  id          String  @id @default(cuid()) @map("_id")
   key         String  @unique
   name        String
   percent     Float
@@ -52,7 +15,7 @@ model AllocationBucket {
 
 /// Rate card (one row per role / domain)
 model RoleRate {
-  id           String            @id @default(cuid())
+  id           String            @id @default(cuid()) @map("_id")
   name         String            @unique
   family       String
   marketMin    Float
@@ -71,28 +34,10 @@ model RoleRate {
   people       Person[]
 }
 
-model Client {
-  id             String    @id @default(cuid())
-  name           String
-  contactName    String?
-  email          String?
-  phone          String?
-  country        String?   @default("USA")
-  city           String?
-  timezone       String?
-  website        String?
-  billingAddress String?
-  notes          String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  projects       Project[]
-  invoices       Invoice[]
-}
-
 /// status: DRAFT | QUOTED | NEGOTIATION | ACTIVE | ON_HOLD | COMPLETED | CANCELLED
 /// engagementModel: TM | RETAINER | BLENDED | FIXED
 model Project {
-  id                 String            @id @default(cuid())
+  id                 String            @id @default(cuid()) @map("_id")
   code               String            @unique
   name               String
   clientId           String
@@ -125,11 +70,13 @@ model Project {
   timeEntries        TimeEntry[]
   expenses           Expense[]
   invoices           Invoice[]
+
+  @@index([clientId])
 }
 
 /// tier: STANDARD | FLOOR | PREMIUM | CUSTOM
 model ProjectResource {
-  id            String        @id @default(cuid())
+  id            String        @id @default(cuid()) @map("_id")
   projectId     String
   project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   roleId        String?
@@ -145,11 +92,13 @@ model ProjectResource {
   sortOrder     Int           @default(0)
   lines         MonthlyLine[]
   assignments   Assignment[]
+
+  @@index([projectId])
 }
 
 /// status: DRAFT | INVOICED | PAID — synced from the linked invoice
 model MonthlyRecord {
-  id         String        @id @default(cuid())
+  id         String        @id @default(cuid()) @map("_id")
   projectId  String
   project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   month      String // YYYY-MM
@@ -165,10 +114,11 @@ model MonthlyRecord {
   lines      MonthlyLine[]
 
   @@unique([projectId, month])
+  @@index([invoiceId])
 }
 
 model MonthlyLine {
-  id         String           @id @default(cuid())
+  id         String           @id @default(cuid()) @map("_id")
   recordId   String
   record     MonthlyRecord    @relation(fields: [recordId], references: [id], onDelete: Cascade)
   resourceId String?
@@ -176,13 +126,13 @@ model MonthlyLine {
   label      String
   hours      Float
   rate       Float
-}
 
-// ---------- Team & delivery ----------
+  @@index([recordId])
+}
 
 /// type: EMPLOYEE | CONTRACTOR · costBasis: MONTHLY (₹ per month, e.g. CTC ÷ 12) | HOURLY (₹ per hour)
 model Person {
-  id               String       @id @default(cuid())
+  id               String       @id @default(cuid()) @map("_id")
   name             String
   email            String?
   title            String?
@@ -207,7 +157,7 @@ model Person {
 
 /// A person staffed on a project, optionally against one resource line of the quote.
 model Assignment {
-  id            String           @id @default(cuid())
+  id            String           @id @default(cuid()) @map("_id")
   projectId     String
   project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   personId      String
@@ -218,11 +168,12 @@ model Assignment {
   billable      Boolean          @default(true)
 
   @@unique([projectId, personId])
+  @@index([personId])
 }
 
 /// status: PLANNED | IN_PROGRESS | DONE | BLOCKED
 model Milestone {
-  id          String    @id @default(cuid())
+  id          String    @id @default(cuid()) @map("_id")
   projectId   String
   project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   title       String
@@ -233,11 +184,13 @@ model Milestone {
   status      String    @default("PLANNED")
   completedAt DateTime?
   sortOrder   Int       @default(0)
+
+  @@index([projectId])
 }
 
 /// One person, one project, one day. costRateInr is snapshotted so salary changes never rewrite history.
 model TimeEntry {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   personId    String
   person      Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
   projectId   String
@@ -252,11 +205,9 @@ model TimeEntry {
   @@index([projectId, date])
 }
 
-// ---------- Finance (books in ₹, client billing in US$) ----------
-
 /// bucketKey links spend to an AllocationBucket (budget vs actual). null = client pass-through (outside the 65/10/25 model).
 model ExpenseCategory {
-  id        String    @id @default(cuid())
+  id        String    @id @default(cuid()) @map("_id")
   name      String    @unique
   bucketKey String?
   active    Boolean   @default(true)
@@ -266,7 +217,7 @@ model ExpenseCategory {
 
 /// currency: INR | USD. amountInr = amount × fxRate (fxRate 1 for INR). paidOn null = unpaid (payable).
 model Expense {
-  id           String          @id @default(cuid())
+  id           String          @id @default(cuid()) @map("_id")
   date         DateTime
   vendor       String
   description  String?
@@ -287,14 +238,16 @@ model Expense {
   reference    String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
-  invoiceLine  InvoiceLine?
+  // At most one line: enforced by the partial unique index in scripts/ensure-indexes.ts
+  invoiceLines InvoiceLine[]
 
   @@index([date])
+  @@index([projectId])
 }
 
 /// status: DRAFT | SENT | PARTIAL | PAID | VOID. fxRate = ₹ per US$ used to book revenue on the issue date.
 model Invoice {
-  id        String          @id @default(cuid())
+  id        String          @id @default(cuid()) @map("_id")
   number    String          @unique
   clientId  String
   client    Client          @relation(fields: [clientId], references: [id])
@@ -312,11 +265,14 @@ model Invoice {
   lines     InvoiceLine[]
   payments  Payment[]
   months    MonthlyRecord[]
+
+  @@index([clientId])
+  @@index([projectId])
 }
 
 /// kind: SERVICES | PASS_THROUGH | OTHER
 model InvoiceLine {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   invoiceId   String
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   kind        String   @default("SERVICES")
@@ -324,15 +280,19 @@ model InvoiceLine {
   quantity    Float    @default(1)
   unitPrice   Float
   amount      Float
-  expenseId   String?  @unique
+  // Unique when set (an expense is billed once): partial unique index in scripts/ensure-indexes.ts.
+  // Not @unique here, because MongoDB's plain unique index would allow only one line without an expense.
+  expenseId   String?
   expense     Expense? @relation(fields: [expenseId], references: [id], onDelete: SetNull)
   sortOrder   Int      @default(0)
+
+  @@index([invoiceId])
 }
 
 /// amountUsd settles the invoice; inrReceived landed in the bank; bankChargesInr were deducted on the way.
 /// Realised FX gain/loss = inrReceived + bankChargesInr − amountUsd × invoice.fxRate
 model Payment {
-  id             String      @id @default(cuid())
+  id             String      @id @default(cuid()) @map("_id")
   invoiceId      String
   invoice        Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   date           DateTime
@@ -342,15 +302,15 @@ model Payment {
   reference      String?
   createdAt      DateTime    @default(now())
   fundEntries    FundEntry[]
-}
 
-// ---------- Treasury: funds, commitments, policies ----------
+  @@index([invoiceId])
+}
 
 /// Movements into / out of a fund (fundKey = AllocationBucket.key, or "passthrough" for client pass-through clearing).
 /// type: ALLOCATION (cash received, split by the active policy) | OPENING | TRANSFER | ADJUSTMENT.
 /// Paid expenses are debited on the fly from the Expense table, so edits there never go out of sync.
 model FundEntry {
-  id         String   @id @default(cuid())
+  id         String   @id @default(cuid()) @map("_id")
   date       DateTime
   fundKey    String
   amountInr  Float // + in, − out
@@ -364,13 +324,14 @@ model FundEntry {
   createdAt  DateTime @default(now())
 
   @@index([fundKey, date])
+  @@index([paymentId])
 }
 
 /// Future obligations. frequency: ONE_OFF | MONTHLY | QUARTERLY | YEARLY.
 /// kind: CONTRACTOR | TAX | SUBSCRIPTION | RENT | LOAN | OTHER (payroll is derived from People).
 /// essential = counts toward monthly unavoidable burn (runway).
 model Commitment {
-  id          String    @id @default(cuid())
+  id          String    @id @default(cuid()) @map("_id")
   name        String
   kind        String    @default("OTHER")
   fundKey     String
@@ -388,23 +349,11 @@ model Commitment {
 /// Allocation policy by company stage. allocations = JSON [{ key, percent }]. Activating one writes it to AllocationBucket.
 /// stage: STARTUP | GROWTH | MATURE | CUSTOM
 model FinancialPolicy {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   name        String   @unique
   stage       String   @default("CUSTOM")
   description String?
   allocations String
   active      Boolean  @default(false)
   updatedAt   DateTime @updatedAt
-}
-
-model AuditLog {
-  id        String   @id @default(cuid())
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userName  String
-  action    String
-  entity    String
-  entityId  String?
-  summary   String
-  createdAt DateTime @default(now())
 }

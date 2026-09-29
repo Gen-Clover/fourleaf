@@ -1,0 +1,23 @@
+{
+  "name": "@genclover/ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared UI components, formatting, form helpers and the Gen Clover theme",
+  "exports": {
+    ".": "./src/ui.tsx",
+    "./status-badge": "./src/StatusBadgeClient.tsx",
+    "./format": "./src/format.ts",
+    "./result": "./src/result.ts",
+    "./theme-toggle": "./src/ThemeToggle.tsx",
+    "./brand": "./src/Brand.tsx",
+    "./nav": "./src/nav.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "next": "15.5.26",
+    "react": "19.1.0"
+  }
+}

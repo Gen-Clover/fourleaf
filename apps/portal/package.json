@@ -3,27 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "db:push": "prisma db push",
-    "db:seed": "prisma db seed",
-    "db:reset": "prisma db push --force-reset && prisma db seed",
-    "setup": "prisma db push && prisma db seed",
-    "postinstall": "prisma generate"
+    "lint": "eslint --config ../../eslint.config.mjs .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.3",
+    "@genclover/auth": "*",
+    "@genclover/db": "*",
+    "@genclover/finance": "*",
+    "@genclover/ui": "*",
     "bcryptjs": "^3.0.3",
-    "jose": "^6.2.12",
     "next": "15.5.26",
-    "prisma": "^6.19.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "recharts": "^3.10.1",
-    "server-only": "^0.0.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -36,10 +30,6 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.26",
     "tailwindcss": "^4",
-    "tsx": "^4.23.15",
     "typescript": "^5"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   }
 }

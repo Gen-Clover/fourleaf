@@ -1,8 +1,8 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { StatusBadgeClient } from "@/components/StatusBadgeClient";
-import { createUser, resetPassword, updateUser } from "../actions";
+import { StatusBadgeClient } from "@genclover/ui/status-badge";
+import { createUser, resetPassword, updateUser } from "./actions";
 
 type U = { id: string; name: string; email: string; role: string; active: boolean; lastLoginAt: string | null };
 

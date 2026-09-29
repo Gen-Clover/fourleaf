@@ -2,9 +2,9 @@
 
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/db";
-import { createSession } from "@/lib/auth";
-import { audit } from "@/lib/audit";
+import { prisma } from "@genclover/db";
+import { createSession } from "@genclover/auth";
+import { audit } from "@genclover/db/audit";
 
 export async function login(_: { error?: string } | undefined, formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();

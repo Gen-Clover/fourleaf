@@ -1,0 +1,71 @@
+// Shared tables used by every tool: users, settings, clients, audit log.
+// Database: MongoDB. IDs are cuid strings stored as _id.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+/// Role: ADMIN | EDITOR | VIEWER
+model User {
+  id           String     @id @default(cuid()) @map("_id")
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         String     @default("VIEWER")
+  active       Boolean    @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  auditLogs    AuditLog[]
+  projects     Project[]
+}
+
+/// Editable formula parameters (FX, hours, load factor, floor rule, packages...)
+model Setting {
+  key         String   @id @map("_id")
+  value       String
+  label       String
+  group       String
+  type        String   @default("number") // number | text
+  unit        String?
+  description String?
+  sortOrder   Int      @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+model Client {
+  id             String    @id @default(cuid()) @map("_id")
+  name           String
+  contactName    String?
+  email          String?
+  phone          String?
+  country        String?   @default("USA")
+  city           String?
+  timezone       String?
+  website        String?
+  billingAddress String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  projects       Project[]
+  invoices       Invoice[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid()) @map("_id")
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName  String
+  action    String
+  entity    String
+  entityId  String?
+  summary   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

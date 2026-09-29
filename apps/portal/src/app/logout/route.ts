@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { destroySession, getCurrentUser } from "@/lib/auth";
-import { audit } from "@/lib/audit";
+import { destroySession, getCurrentUser } from "@genclover/auth";
+import { audit } from "@genclover/db/audit";
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();

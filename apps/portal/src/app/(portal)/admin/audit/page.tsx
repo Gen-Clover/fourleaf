@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { PageHeader } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { PageHeader } from "@genclover/ui";
+import { requireRole } from "@genclover/auth";
+import { prisma } from "@genclover/db";
 
 const PAGE = 50;
 

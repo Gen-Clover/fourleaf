@@ -1,0 +1,19 @@
+{
+  "name": "@genclover/auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Portal login sessions and role checks shared by every tool",
+  "exports": {
+    ".": "./src/server.ts",
+    "./session": "./src/session.ts"
+  },
+  "dependencies": {
+    "@genclover/db": "*",
+    "jose": "^6.2.12",
+    "server-only": "^0.0.1"
+  },
+  "peerDependencies": {
+    "next": "15.5.26",
+    "react": "19.1.0"
+  }
+}

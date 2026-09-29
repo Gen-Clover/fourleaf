@@ -112,8 +112,8 @@ All thresholds are editable: **Admin → Formula & Allocation → Treasury & ale
 ## 8. Getting started
 
 ```powershell
-cd "D:\Welcome to 2026\Gen Clover\Gen Clover Calculator\genclover-portal"
-npm run dev        # then open http://localhost:3000
+cd "D:\2026\gen-clover\code\genclover-portal"
+npm run build; npm start   # then open http://localhost:3000 (use `npm run dev` while changing code)
 ```
 
 1. Change the admin password: **Admin → Users & Roles**.
@@ -126,8 +126,8 @@ npm run dev        # then open http://localhost:3000
 
 ## 9. Under the hood
 
-- **Stack:** Next.js 15, React 19, Prisma, SQLite (use Postgres for hosted multi-user), Tailwind, Recharts.
-- **Engine files:** `src/lib/finance.ts` (allocation, commitment schedules, hire simulation, FX, FY), `src/lib/treasury.ts` (fund balances, obligations, burn, runway, forecast), `src/lib/alerts.ts` (alert rules), `src/lib/ledger.ts` (P&L and reports), `src/lib/invoicing.ts` (invoice numbering and sync).
+- **Stack:** Next.js 15, React 19, Prisma, MongoDB (Atlas), Tailwind, Recharts. The finance tool is one of the tools in the Gen Clover Portal (`tools/finance` in the `genclover-portal` repo).
+- **Engine files** (in `tools/finance/src/lib/`): `finance.ts` (allocation, commitment schedules, hire simulation, FX, FY), `treasury.ts` (fund balances, obligations, burn, runway, forecast), `alerts.ts` (alert rules), `ledger.ts` (P&L and reports), `invoicing.ts` (invoice numbering and sync).
 - **Integrity:** allocations are stored per payment with the policy name, so deleting a payment removes its allocations. Paid expenses are debited live from the Expenses table. Rates, costs and allocation snapshots are never rewritten. Every change is in the audit log.
 - **Tested:** 100 end-to-end checks against the running app, plus unit checks of the allocation and hire-simulation maths.
 

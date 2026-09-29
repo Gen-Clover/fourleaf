@@ -15,8 +15,13 @@
     "dev": "npm run dev -w @genclover/portal",
     "build": "npm run build -w @genclover/portal",
     "start": "npm run start -w @genclover/portal",
-    "lint": "npm run lint -w @genclover/portal",
-    "typecheck": "npm run typecheck -w @genclover/portal"
+    "lint": "eslint apps tools packages",
+    "typecheck": "npm run typecheck -w @genclover/portal",
+    "db:generate": "npm run generate -w @genclover/db",
+    "db:push": "npm run push -w @genclover/db",
+    "db:seed": "npm run seed -w @genclover/db",
+    "setup": "npm run setup -w @genclover/db",
+    "db:migrate-sqlite": "npm run migrate:sqlite -w @genclover/db --"
   },
   "allowScripts": {
     "prisma@6.19.3": true,

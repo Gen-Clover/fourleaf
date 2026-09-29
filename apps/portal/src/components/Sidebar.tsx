@@ -3,103 +3,91 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { CloverMark, Wordmark } from "@genclover/ui/brand";
+import type { NavItem, ToolNav } from "@genclover/ui/nav";
+import { ThemeToggle } from "@genclover/ui/theme-toggle";
 
-type Item = { href: string; label: string; icon: string; editor?: boolean };
-
-const MAIN: Item[] = [
-  { href: "/", label: "Dashboard", icon: "▦" },
-  { href: "/projects", label: "Projects", icon: "◧" },
-  { href: "/clients", label: "Clients", icon: "◉" },
-  { href: "/calculator", label: "Quick Calculator", icon: "∑" },
-  { href: "/rate-card", label: "Rate Card", icon: "☰" },
-];
-
-const CFO: Item[] = [
-  { href: "/cfo", label: "CFO Dashboard", icon: "◎", editor: true },
-  { href: "/funds", label: "Funds", icon: "▣", editor: true },
-  { href: "/commitments", label: "Commitments", icon: "⧗", editor: true },
-  { href: "/planner", label: "Hire Planner", icon: "⚖", editor: true },
-  { href: "/pipeline", label: "Sales Pipeline", icon: "↗", editor: true },
-];
-
-const DELIVERY: Item[] = [
-  { href: "/timesheets", label: "Timesheets", icon: "◷" },
-  { href: "/people", label: "People", icon: "☺", editor: true },
-];
-
-const FINANCE: Item[] = [
-  { href: "/billing", label: "Monthly Billing", icon: "₿" },
-  { href: "/invoices", label: "Invoices", icon: "⎙" },
-  { href: "/expenses", label: "Expenses", icon: "₹", editor: true },
-  { href: "/reports", label: "Reports", icon: "▤", editor: true },
-];
-
-const ADMIN: Item[] = [
-  { href: "/admin", label: "Admin Overview", icon: "⚙" },
-  { href: "/admin/rate-card", label: "Manage Rate Card", icon: "✎" },
-  { href: "/admin/formula", label: "Formula & Allocation", icon: "ƒ" },
-  { href: "/admin/policies", label: "Financial Policies", icon: "§" },
+/** Admin links that belong to the portal itself, not to any one tool. */
+const CORE_ADMIN: NavItem[] = [
   { href: "/admin/users", label: "Users & Roles", icon: "👤" },
   { href: "/admin/audit", label: "Audit Log", icon: "⎘" },
 ];
 
-export default function Sidebar({ role, name, company }: { role: string; name: string; company: string }) {
+export default function Sidebar({ role, name, tools }: { role: string; name: string; tools: ToolNav[] }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const isActive = (href: string) => (href === "/" ? path === "/" : href === "/admin" ? path === "/admin" : path.startsWith(href));
+  const visible = (items: NavItem[]) => items.filter((i) => !i.editor || role !== "VIEWER");
+  const adminItems = [...tools.flatMap((t) => t.admin ?? []), ...CORE_ADMIN];
 
-  const link = (i: Item) => (
+  const link = (i: NavItem) => (
     <Link
       key={i.href}
       href={i.href}
+      prefetch
       onClick={() => setOpen(false)}
-      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
-        isActive(i.href) ? "bg-brand text-white" : "text-neutral-300 hover:bg-white/10 hover:text-white"
+      className={`relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+        isActive(i.href) ? "bg-brand-soft font-medium text-neutral-900" : "text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900"
       }`}
     >
-      <span className="w-4 text-center opacity-80">{i.icon}</span>
+      {isActive(i.href) && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-brand" />}
+      <span className={`w-4 text-center ${isActive(i.href) ? "text-brand-fg" : "opacity-70"}`}>{i.icon}</span>
       {i.label}
     </Link>
   );
 
+  const heading = (title: string) => <div className="mt-6 mb-2 px-3 font-display text-[11px] font-semibold tracking-eyebrow text-neutral-500 uppercase">{title}</div>;
+
   return (
     <>
-      <div className="flex items-center justify-between bg-ink px-4 py-3 lg:hidden">
-        <span className="font-semibold text-white">{company} Portal</span>
-        <button className="btn-secondary btn-sm" onClick={() => setOpen(!open)}>Menu</button>
-      </div>
-      <aside
-        className={`${open ? "block" : "hidden"} fixed inset-y-0 left-0 z-40 w-64 overflow-y-auto bg-ink p-4 lg:block`}
-      >
-        <div className="mb-6 flex items-center gap-3 px-1">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand font-bold text-white">GC</div>
-          <div>
-            <div className="text-sm font-semibold text-white">{company}</div>
-            <div className="text-xs text-neutral-400">Financial Control System</div>
-          </div>
+      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-neutral-200 bg-surface/90 px-4 py-3 backdrop-blur lg:hidden">
+        <Link href="/" className="flex items-center gap-2">
+          <CloverMark className="h-7 w-7" />
+          <Wordmark className="text-sm" />
+        </Link>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button className="btn-secondary btn-sm" onClick={() => setOpen(!open)}>Menu</button>
         </div>
-        <nav className="space-y-1">{MAIN.map(link)}</nav>
-        {[["Financial Control", CFO], ["Delivery", DELIVERY], ["Finance", FINANCE]].filter(([, items]) => (items as Item[]).some((i) => !i.editor || role !== "VIEWER")).map(([title, items]) => (
-          <div key={title as string}>
-            <div className="mt-6 mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">{title as string}</div>
-            <nav className="space-y-1">{(items as Item[]).filter((i) => !i.editor || role !== "VIEWER").map(link)}</nav>
-          </div>
-        ))}
+      </div>
+      <aside className={`${open ? "block" : "hidden"} fixed inset-y-0 left-0 z-40 w-64 overflow-y-auto border-r border-neutral-200 bg-surface p-4 lg:block`}>
+        <div className="mb-6 flex items-center justify-between gap-2 px-1">
+          <Link href="/" className="flex items-center gap-2.5">
+            <CloverMark className="h-8 w-8" />
+            <div>
+              <Wordmark className="text-sm" />
+              <div className="mt-1 font-display text-[10px] font-semibold tracking-eyebrow text-brand-fg uppercase">Portal</div>
+            </div>
+          </Link>
+          <ThemeToggle className="hidden lg:inline-flex" />
+        </div>
+        {tools.map((tool) =>
+          tool.sections.map((s, i) => {
+            const items = visible(s.items);
+            if (!items.length) return null;
+            return (
+              <div key={`${tool.tool}-${s.title ?? i}`}>
+                {s.title && heading(s.title)}
+                <nav className="space-y-0.5">{items.map(link)}</nav>
+              </div>
+            );
+          }),
+        )}
         {role === "ADMIN" && (
           <>
-            <div className="mt-6 mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Admin Panel</div>
-            <nav className="space-y-1">{ADMIN.map(link)}</nav>
+            {heading("Admin Panel")}
+            <nav className="space-y-0.5">{adminItems.map(link)}</nav>
           </>
         )}
-        <div className="mt-8 rounded-lg bg-white/5 p-3">
-          <div className="truncate text-sm text-white">{name}</div>
-          <div className="mb-2 text-xs text-neutral-400">{role}</div>
+        <div className="mt-8 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+          <div className="truncate text-sm font-medium text-neutral-900">{name}</div>
+          <div className="mb-2 font-display text-[10px] font-semibold tracking-eyebrow text-neutral-500 uppercase">{role}</div>
           <form action="/logout" method="post">
-            <button className="text-xs text-neutral-300 underline hover:text-white">Sign out</button>
+            <button className="text-xs text-neutral-600 underline hover:text-brand-fg">Sign out</button>
           </form>
         </div>
       </aside>
-      {open && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
+      {open && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setOpen(false)} />}
     </>
   );
 }

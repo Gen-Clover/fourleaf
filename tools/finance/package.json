@@ -1,0 +1,25 @@
+{
+  "name": "@genclover/finance",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Finance tool: rate card, projects, delivery, invoicing, expenses, treasury and CFO dashboard",
+  "exports": {
+    "./app/*": "./src/app/*.tsx",
+    "./api/*": "./src/api/*.ts",
+    "./lib/*": "./src/lib/*.ts",
+    "./nav": "./src/nav.ts"
+  },
+  "dependencies": {
+    "@genclover/auth": "*",
+    "@genclover/db": "*",
+    "@genclover/ui": "*",
+    "recharts": "^3.10.1",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "next": "15.5.26",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  }
+}
