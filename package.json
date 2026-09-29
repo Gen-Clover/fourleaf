@@ -2,42 +2,21 @@
   "name": "genclover-portal",
   "version": "0.1.0",
   "private": true,
+  "description": "Gen Clover internal portal: one app hosting every internal tool (finance, lead finder, ...)",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "db:push": "prisma db push",
-    "db:seed": "prisma db seed",
-    "db:reset": "prisma db push --force-reset && prisma db seed",
-    "setup": "prisma db push && prisma db seed",
-    "postinstall": "prisma generate"
-  },
-  "dependencies": {
-    "@prisma/client": "^6.19.3",
-    "bcryptjs": "^3.0.3",
-    "jose": "^6.2.12",
-    "next": "15.5.26",
-    "prisma": "^6.19.3",
-    "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "recharts": "^3.10.1",
-    "server-only": "^0.0.1",
-    "zod": "^4.6.5"
-  },
-  "devDependencies": {
-    "@eslint/eslintrc": "^3",
-    "@tailwindcss/postcss": "^4",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "15.5.26",
-    "tailwindcss": "^4",
-    "tsx": "^4.23.15",
-    "typescript": "^5"
+    "dev": "npm run dev -w @genclover/portal",
+    "build": "npm run build -w @genclover/portal",
+    "start": "npm run start -w @genclover/portal",
+    "lint": "npm run lint -w @genclover/portal",
+    "typecheck": "npm run typecheck -w @genclover/portal"
   },
   "allowScripts": {
     "prisma@6.19.3": true,
@@ -45,8 +24,5 @@
     "@prisma/engines@6.19.3": true,
     "esbuild@0.28.2": true,
     "unrs-resolver@1.12.2": true
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   }
 }

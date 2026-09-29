@@ -18,5 +18,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
+  // Node.js runtime: reads the repo-root .env (loaded in next.config.ts) like the rest of the server.
+  runtime: "nodejs",
   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|ico)$).*)"],
 };

@@ -1,8 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
-/.pnp
+# dependencies (any workspace)
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -11,14 +11,15 @@
 !.yarn/versions
 
 # testing
-/coverage
+coverage/
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
-/build
+build/
+dist/
 
 # misc
 .DS_Store
@@ -41,13 +42,11 @@ yarn-error.log*
 next-env.d.ts
 
 !.env.example
-# sqlite
-prisma/*.db
-prisma/*.db-journal
 
-# Any database file holds client and salary data — never commit (incl. backups anywhere)
+# Any database file or export holds client and salary data — never commit (incl. backups anywhere)
 *.db
 *.db-journal
+data-export/
 
 # Editor / OS
 .vscode/
