@@ -23,7 +23,8 @@ Engagement models (monthly billing)
 export default async function FormulaPage() {
   await requireRole("ADMIN");
   const [settings, buckets] = await Promise.all([
-    prisma.setting.findMany({ orderBy: { sortOrder: "asc" } }),
+    // Lead Finder settings have their own page (Lead Finder → Settings).
+    prisma.setting.findMany({ where: { NOT: { group: "Lead Finder" } }, orderBy: { sortOrder: "asc" } }),
     prisma.allocationBucket.findMany({ orderBy: { sortOrder: "asc" } }),
   ]);
   return (

@@ -1,10 +1,13 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
+import { CLIENT_CODE_HINT, suggestClientCode } from "@genclover/ids";
 import { saveClient } from "./actions";
 
 type C = {
   id?: string;
+  number?: string;
+  code?: string;
   name?: string;
   contactName?: string | null;
   email?: string | null;
@@ -19,6 +22,7 @@ type C = {
 
 export default function ClientForm({ client, readOnly }: { client?: C; readOnly?: boolean }) {
   const [state, action, pending] = useActionState(saveClient, undefined);
+  const [code, setCode] = useState("");
   const f = (name: keyof C, label: string, type = "text", required = false) => (
     <div>
       <label className="label">{label}{required && " *"}</label>
@@ -29,7 +33,46 @@ export default function ClientForm({ client, readOnly }: { client?: C; readOnly?
     <form action={action} className="card space-y-4 p-5">
       {client?.id && <input type="hidden" name="id" value={client.id} />}
       <div className="grid gap-4 md:grid-cols-3">
-        {f("name", "Client / Company", "text", true)}
+        {client?.id ? (
+          <>
+            <div>
+              <label className="label">Client ID</label>
+              <input className="input font-mono" value={client.number} disabled />
+            </div>
+            <div>
+              <label className="label">Client code</label>
+              <input className="input font-mono" value={client.code} disabled title="Locked: project IDs, Jira and folders use it" />
+            </div>
+            <div className="hidden md:block" />
+          </>
+        ) : null}
+        <div>
+          <label className="label">Client / Company *</label>
+          <input
+            className="input"
+            name="name"
+            defaultValue={client?.name ?? ""}
+            required
+            disabled={readOnly}
+            onBlur={(e) => !client?.id && !code && setCode(suggestClientCode(e.target.value, new Set()))}
+          />
+        </div>
+        {!client?.id && (
+          <div>
+            <label className="label">Client code *</label>
+            <input
+              className="input font-mono uppercase"
+              name="code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              required
+              maxLength={10}
+              pattern="[A-Za-z][A-Za-z0-9]{1,9}"
+              title={CLIENT_CODE_HINT}
+            />
+            <p className="mt-1 text-xs text-neutral-500">{CLIENT_CODE_HINT}. Used in project IDs (ABR-P01), Jira, folders and emails. Can&apos;t be changed later.</p>
+          </div>
+        )}
         {f("contactName", "Primary contact")}
         {f("email", "Email", "email")}
         {f("phone", "Phone")}

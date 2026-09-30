@@ -58,6 +58,9 @@ export const STATUS_LABEL: Record<string, string> = {
 };
 
 export const PROJECT_STATUSES = ["DRAFT", "QUOTED", "NEGOTIATION", "ACTIVE", "ON_HOLD", "COMPLETED", "CANCELLED"];
+/** A care plan (hosting, updates, support after go-live) is a project of its own, with its own ID. */
+export const PROJECT_KINDS = ["PROJECT", "CARE"] as const;
+export const KIND_LABEL: Record<string, string> = { PROJECT: "Project", CARE: "Care plan" };
 export const MONTH_STATUSES = ["DRAFT", "INVOICED", "PAID"];
 export const TIERS = ["STANDARD", "FLOOR", "PREMIUM", "CUSTOM"];
 export const INVOICE_STATUSES = ["DRAFT", "SENT", "PARTIAL", "PAID", "VOID"];

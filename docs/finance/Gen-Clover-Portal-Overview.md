@@ -66,7 +66,7 @@ One policy is live at a time. An admin can switch it in one click.
 | 2. Can we afford it? | **Hire Planner** | Simulates a hire before onboarding (see §5). |
 | 3. Price & agree | Project → *Resources & Quote*, *Agreement* | Rate-card pricing, floor warnings, then the agreed model: T&M, Retainer, Blended or Fixed. |
 | 4. Deliver | *Milestones*, *Team & Cost*, **Timesheets** | People assigned to quote lines. Weekly hours carry each person's ₹/hr cost. |
-| 5. Bill | *Monthly Billing* → **Invoices** | Hours come from timesheets. One click creates the invoice, and issuing it assigns GST number `GC/26-27/0001`. |
+| 5. Bill | *Monthly Billing* → **Invoices** | Hours come from timesheets. One click creates the invoice, and issuing it assigns GST number `GCI/26-27/0001`. |
 | 6. Get paid | invoice page | Record US$ settled and ₹ credited. **The allocation engine splits the ₹ into funds automatically.** FX gain/loss is calculated. |
 | 7. Spend | **Expenses**, **People → Run payroll** | Each category belongs to a fund. Paid spending leaves that fund. Unpaid bills count as commitments. |
 | 8. Commit | **Commitments** | Rent, taxes, subscriptions, loans, contractor retainers. Payroll is added automatically from People. |

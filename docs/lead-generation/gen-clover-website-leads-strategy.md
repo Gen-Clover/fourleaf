@@ -162,8 +162,8 @@ Right now a prospect lands on an AI/data consultancy. Before outreach starts:
 
 Each of these is a **self-contained tool** in the `tools\` folder of the **genclover-portal** repo (see section 10). They all run inside the one portal app, share one login and one database, and are linked by shared IDs.
 
-0. **Client onboarding registration:** creates the unique Client ID (`GC-0001`) used everywhere in Gen Clover.
-1. **Lead finder** (`tools/lead-finder`; folder created, design not decided yet): pulls businesses by niche and city from the Google Places API, checks each one's website (missing site, not mobile-friendly, slow, no SSL, no WhatsApp) and outputs a ranked CSV of hot leads.
+0. **Client onboarding registration:** creates the unique Client ID (`GC-2026-0001`) and the client code (`ABR`) used everywhere in Gen Clover.
+1. **Lead finder** (`tools/lead-finder`, built 30 Sep 2026): searches Google Maps by niche and area (a map grid gets past Google's 60-results-per-search limit), checks each business's website (missing site, social page only, down, no HTTPS, not mobile-friendly, slow, no WhatsApp, form or booking), scores every lead for six services (new website, redesign, WhatsApp & lead capture, Google Business Profile, SEO & speed, booking & payments), writes the first message from each lead's own findings, schedules follow-ups and converts won leads into clients. See `tools/lead-finder/README.md`.
 2. **Demo generator:** turns each lead's name, services, photos and reviews into a personalised preview homepage in minutes.
 3. **Outreach kit:** WhatsApp and email scripts, a follow-up sequence (day 1, 3, 7), Loom script, and objection answers ("too expensive", "my nephew makes sites").
 4. **Pipeline tracker:** a simple CRM sheet or dashboard.
@@ -216,7 +216,7 @@ genclover-portal\                  ← ONE git repo (npm workspaces)
 └── packages\                      ← shared by all tools
     ├── db\                        ← Prisma schema + client (User, Client, Lead, Sequence…)
     ├── auth\                      ← session, requireRole
-    ├── ids\                       ← GL-YYYY-MM-XXXXXX / GC-… generators
+    ├── ids\                       ← lead, client, project and invoice ID generators
     └── ui\                        ← shared components
 ```
 
@@ -247,16 +247,21 @@ Every tool sits behind one login, at URLs like `portal.genclover.com/finance`, `
 
 ### IDs that travel everywhere
 
-The existing `Client` table (from the finance tool) uses internal cuids. Add a readable, unique `code`:
+**Decided 30 Sep 2026, built in `packages/ids`.** Records link to each other by internal cuids. The readable IDs below are for people and the outside world. Once handed out they never change and are never reused.
 
-| Record | Format | Created when |
-|---|---|---|
-| Lead | `GL-YYYY-MM-XXXXXX` (e.g. `GL-2026-09-000001`) | The Lead Finder finds a business |
-| Client | `GC-0001` | The lead converts at onboarding. The lead record links to it, so its history carries over. |
-| Project | `GC-0001-P01` | A website project starts |
-| Care plan | `GC-0001-CARE` | The site goes live on a care plan |
+| Record | Format | Set by | Created when |
+|---|---|---|---|
+| Lead | `GL-YYYY-MM-XXXXXX` (e.g. `GL-2026-09-000001`) | System | The Lead Finder finds a business |
+| Client ID | `GC-YYYY-NNNN` (e.g. `GC-2026-0001`) | System, year of registration (IST) | The lead converts at onboarding. The lead record links to it, so its history carries over. |
+| Client code | 2–10 letters/digits starting with a letter (e.g. `ABR` for Abrams Books) | The person onboarding the client. Locked afterwards. | At onboarding |
+| Project | `<client code>-Pnn` (e.g. `ABR-P01`) | System, numbered per client | A project starts |
+| Care plan | A project of type "Care plan" (e.g. `ABR-P03`) | System | The site goes live on a care plan |
+| Invoice | `GCI/26-27/0001` | System, when issued | One consecutive series per Indian financial year, as GST requires. At most 16 characters. Drafts have no number yet. |
+| Payment | Bank UTR / FIRC reference | Bank | Recorded against the invoice |
 
-The same `GC-0001` goes into the client folder name, the repo name, invoice references, the WhatsApp group name and email subjects.
+The client code goes into Jira (it's the Jira project key), folder and repo names, the WhatsApp group name and email subjects. Invoices show the Client ID, client code and project ID.
+
+Numbers come from atomic counters in the shared `Sequence` table, never from counting existing rows. `npm run db:push` also backfills any record that is missing its ID.
 
 **Lead ID rules (`GL-YYYY-MM-XXXXXX`):**
 
@@ -289,7 +294,7 @@ D:\GenClover\
 ├── 01-brand\           ← logos, Digital Content, LinkedIn, Clovi
 ├── 02-sales\           ← strategy docs, proposal and pitch templates
 ├── 03-clients\
-│   └── GC-0001-crb-eligo\   ← contracts, SOW, assets (named by client ID)
+│   └── GC-2026-0001-crb-eligo\   ← contracts, SOW, assets (named by client ID)
 ├── 99-archive\         ← old backups and zips (kept, just out of the way)
 └── code\               ← git repos only
     ├── genclover-portal\    ← ONE repo: portal app + all internal tools (section 10)
@@ -299,7 +304,7 @@ D:\GenClover\
     ├── genclover-website\   ← public genclover.com
     ├── site-starter\        ← niche templates (GitHub "template repo")
     └── client-sites\
-        └── gc-0001-drsharma-dental\   ← one repo per client site
+        └── gc-2026-0002-drsharma-dental\   ← one repo per client site
 ```
 
 ### How the repos are organised
@@ -320,21 +325,20 @@ All repos should be **private on a GitHub organisation** (for example `genclover
 
 1. Reorganise the folders into `D:\GenClover\` (copy and move only, nothing deleted, with the full move list reviewed first), or keep the current root?
 2. Create or confirm a GitHub organisation. The portal tools have no remote yet.
-3. Confirm the Client ID format: `GC-0001`, or `GC-2026-0001` with the year in it. **Clash to resolve first:** the finance tool already numbers *projects* `GC-2026-0001` (prefix set in Admin → Formula & Allocation). Clients and projects can't both use `GC-YYYY-NNNN`. Either change the project prefix (for example `PR-2026-0001`) or use a different client format.
-4. Lead Finder design: how it works, what it stores (including Google's rules on storing Places data), and whether it needs a background worker.
 
 **Decided:**
 
 - Lead ID format: `GL-YYYY-MM-XXXXXX`.
+- Client ID `GC-2026-0001`, client code chosen at onboarding (`ABR`), project `ABR-P01`, care plans as projects, invoices `GCI/26-27/0001` (section 10, "IDs that travel everywhere").
+- Database: MongoDB. Atlas for hosting; `npm run db:local` for local work.
 - Portal architecture: one repo, one portal app, tools as separate modules, one shared database (section 10).
-- Database: MongoDB (Atlas).
 - Look and feel: genclover.com's design, dark by default with a light toggle.
 
 **Build order:**
 
 0. ~~Restructure `genclover-portal` into the one-repo layout and move the database~~ **Done 30 Sep 2026** (MongoDB, genclover.com theme, faster dev server). See `docs/lead-generation/portal-restructure-plan.md`.
-1. Client onboarding with the Client ID
-2. Lead Finder (`tools/lead-finder`) with website scoring (needs a Google Places API key)
+1. ~~Client onboarding with the Client ID~~ **Done 30 Sep 2026**: `packages/ids`, Client ID and code on the client form, project IDs from the client code, care-plan project type, `GCI` invoice series.
+2. ~~Lead Finder (`tools/lead-finder`) with website scoring~~ **Built 30 Sep 2026.** Needs a Google Cloud API key (`GOOGLE_MAPS_API_KEY`) to run live searches.
 3. Demo Generator
 4. Outreach Kit
 5. Pipeline tracker (extend the existing Pipeline page)

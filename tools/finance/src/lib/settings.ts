@@ -20,11 +20,11 @@ export const PARAM_KEYS: (keyof Params)[] = [
   "additionalHourRate",
 ];
 
-export async function getParams(): Promise<Params & { companyName: string; projectCodePrefix: string }> {
+export async function getParams(): Promise<Params & { companyName: string }> {
   const rows = await prisma.setting.findMany();
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   const params = Object.fromEntries(PARAM_KEYS.map((k) => [k, Number(map[k] ?? 0)])) as Params;
-  return { ...params, companyName: map.companyName ?? "Gen Clover", projectCodePrefix: map.projectCodePrefix ?? "GC" };
+  return { ...params, companyName: map.companyName ?? "Gen Clover" };
 }
 
 /** Company + invoicing details printed on invoices. */
@@ -39,7 +39,7 @@ export async function getInvoiceSettings() {
     lut: m.lutNumber ?? "",
     sac: m.sacCode ?? "998314",
     bank: m.bankDetails ?? "",
-    prefix: m.invoicePrefix || "GC",
+    prefix: m.invoicePrefix || "GCI",
     termsDays: Number(m.paymentTermsDays ?? 30) || 30,
   };
 }

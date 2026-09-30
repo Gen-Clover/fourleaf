@@ -5,48 +5,54 @@ One internal web app that hosts every Gen Clover tool behind a single login, on 
 | Tool | Folder | What it does |
 |---|---|---|
 | **Finance** | `tools/finance` | Rate card and pricing, projects and delivery, invoicing, expenses, payroll, reports, treasury and CFO dashboard |
-| **Lead Finder** | `tools/lead-finder` | Not built yet (design to be decided) |
+| **Lead Finder** | `tools/lead-finder` | Google Maps searches by niche and area, website checks, lead scores per service, outreach messages, follow-ups, convert to client |
 
 ## Layout
 
 ```
 genclover-portal/                one git repo, npm workspaces
-├── apps/portal/                 the Next.js app: login, sidebar, one-line route files that point at tool pages
+├── apps/portal/                 the Next.js app: login, portal home (a tile per tool), each tool's top navigation, one-line route files that point at tool pages
+├── apps/workers/                background worker: runs every tool's jobs from the Job table (searches, website checks)
 ├── tools/<name>/                one self-contained folder per tool (pages, server actions, logic, nav.ts)
 ├── packages/db/                 MongoDB schema (prisma/schema/*.prisma), Prisma client, seed, scripts
 ├── packages/auth/               login sessions and role checks
+├── packages/ids/                readable IDs: lead GL-…, client GC-2026-0001 + code ABR, project ABR-P01, invoice GCI/26-27/0001
 ├── packages/ui/                 shared components, formatting, theme (styles.css), logo, theme toggle
-└── docs/                        finance docs, lead-generation strategy and plans
+└── docs/                        roadmap (genclover-portal/), finance docs, lead-generation strategy and plans
 ```
 
 Rules that keep tools independent:
 1. A tool never imports another tool. Tools only use `packages/*`.
-2. Each tool owns its tables in its own schema file (`packages/db/prisma/schema/<tool>.prisma`). Shared tables (`User`, `Setting`, `Client`, `AuditLog`) are in `core.prisma`.
-3. Long-running work goes in a background worker, not a web request.
+2. Each tool owns its tables in its own schema file (`packages/db/prisma/schema/<tool>.prisma`). Shared tables (`User`, `Setting`, `Client`, `AuditLog`, `Sequence`) are in `core.prisma`.
+3. Long-running work goes in a background worker, not a web request: add a job with `enqueue()` from `@genclover/db/jobs` and register its handler in `apps/workers/src/index.ts`.
 
-**Adding a tool:** create `tools/<name>` with a `package.json` named `@genclover/<name>`, put its pages under `src/app/`, export its menu from `src/nav.ts`, add it to `TOOLS` in `apps/portal/src/app/(portal)/layout.tsx`, add a one-line route file per page in `apps/portal/src/app/(portal)/…`, and add the package to `transpilePackages` in `apps/portal/next.config.ts`.
+**Adding a tool:** create `tools/<name>` with a `package.json` named `@genclover/<name>`, put its pages under `src/app/`, export its menu from `src/nav.ts` (with its `home` URL), add a tile to `TOOLS` in `apps/portal/src/app/(home)/page.tsx`, create a route group `apps/portal/src/app/(<name>)/` whose `layout.tsx` wraps pages in `ToolShell` with the tool's menu, add a one-line route file per page in it, and add the package to `transpilePackages` in `apps/portal/next.config.ts`.
 
 ## Run it
 
 Needs Node 22+ (24 recommended) and a MongoDB **replica set**. Transactions need one: MongoDB Atlas always is, and a local server must be started as a single-node replica set.
 
+**Local database, no install:** `npm run db:local` downloads MongoDB on first run and starts a single-node replica set on `127.0.0.1:27017`, keeping data in `.mongo-data/` (ignored by git). Keep it running in its own terminal and point `.env` at it with the local `DATABASE_URL` line in `.env.example`. Stop it with Ctrl+C.
+
 ```bash
 npm install          # installs every workspace and generates the Prisma client
 npm run setup        # creates collections and indexes, seeds rate card, formula, admin user, sample project
-npm run dev          # http://localhost:3000 (Turbopack)
+npm run dev          # portal + worker; http://localhost:3000: portal home, Financial System at /finance, Lead Finder at /leads
 ```
 
-For daily use, run the production build. It's much faster than dev mode: `npm run build && npm start`.
+For daily use, run the production build. It's much faster than dev mode: `npm run build && npm start`, plus `npm run worker` in a second terminal for background jobs.
 
-`.env` lives at the repo root and needs `DATABASE_URL` (MongoDB connection string with the database name, for example `mongodb+srv://user:pass@cluster.mongodb.net/genclover`) and a long random `AUTH_SECRET`. See `.env.example`. For the lowest latency from India, create the Atlas cluster in **Mumbai (ap-south-1)**.
+`.env` lives at the repo root and needs `DATABASE_URL` (MongoDB connection string with the database name, for example `mongodb+srv://user:pass@cluster.mongodb.net/genclover`) and a long random `AUTH_SECRET`. The Lead Finder also needs `GOOGLE_MAPS_API_KEY` (Places API (New) and PageSpeed Insights API enabled) to search Google Maps. To send outreach email from the portal and detect replies, add the `SMTP_*`, `EMAIL_FROM` and (optionally) `IMAP_*` settings. See `.env.example`. For the lowest latency from India, create the Atlas cluster in **Mumbai (ap-south-1)**.
 
 Sign in with `admin@genclover.local` / `ChangeMe@2026` (set `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` in `.env` before seeding to change them), then change the password under **Admin → Users & Roles**.
 
 | Command | What it does |
 |---|---|
-| `npm run db:push` | Apply schema changes (collections and indexes), then run `packages/db/scripts/after-push.ts` |
+| `npm run db:local` | Start the local MongoDB (single-node replica set, data in `.mongo-data/`) |
+| `npm run db:push` | Apply schema changes (collections and indexes), then run `packages/db/scripts/after-push.ts` and `packages/ids/scripts/backfill.ts` (gives any record without a readable ID one) |
 | `npm run db:seed` | Seed defaults (safe to re-run: existing rows are kept) |
 | `npm run db:migrate-sqlite -- <path/to/dev.db>` | One-off copy of the old SQLite database into an **empty** MongoDB database. Keeps every id and checks row counts |
+| `npm run dev:portal` / `npm run worker` | Start only the portal (dev) / only the background worker |
 | `npm run typecheck` | Type-check the portal and every tool and package |
 
 ### MongoDB notes
@@ -81,7 +87,7 @@ Source of truth for all defaults: [`docs/finance/Gen-Clover-Rate-Card-2026.md`](
 3. **Plan delivery**: *Milestones* tab (owner, due date, status) and *Team & Cost* tab (assign people to quote lines).
 4. **Log time** weekly on **Timesheets**. Each entry snapshots the person's ₹/hr, so salary changes never rewrite history.
 5. **Bill the month**: *Monthly Billing* → *Load hours from timesheets* → save → **Create invoice**. The draft invoice gets services lines for the engagement model plus any unbilled pass-through costs.
-6. **Issue** the invoice. It gets the next consecutive GST number `GC/26-27/0001` (per Indian FY), and the month is locked. **Print** it as an export-of-services invoice under LUT.
+6. **Issue** the invoice. It gets the next consecutive GST number `GCI/26-27/0001` (per Indian FY), and the month is locked. **Print** it as an export-of-services invoice under LUT.
 7. **Record payments** as they land: US$ settled, ₹ credited and bank charges. Realised FX gain/loss is computed against the invoice's booking FX. Part payments are supported, and the invoice and month move to Paid automatically.
 8. **Book spend** on **Expenses**. Each category maps to a 65/10/25 bucket, and client pass-through costs sit outside the model and are re-billed at cost. **People → Run payroll** creates the month's salary and contractor expenses.
 9. **Review** on **Reports**: P&L with budget vs actual per bucket, cash flow, receivables aging and project profitability, plus CSV exports for the CA (sales register, payments/FIRC, purchase register, timesheets, P&L).
@@ -104,7 +110,7 @@ Revenue is not cash: funds are filled only when a client **pays**.
 ## What's in it
 
 - **Dashboard**: run-rate, pipeline, billed this month, outstanding invoices, YTD revenue/delivery/profit, 12-month revenue by allocation bucket, revenue by client, alerts (below-floor rates, unrecorded months, overdue invoices, late milestones); for editors and admins also spend this month, unpaid bills and overdue receivables.
-- **Projects**: auto IDs (`GC-YYYY-0001`), client, resource plan from the rate card (Standard / Floor / Premium / Custom tiers, headcount, hours), quoted vs agreed rates, below-floor warnings, package alternatives, **Agreement** (T&M, Retainer, Blended or Fixed monthly), **Milestones**, **Team & Cost** (assignments, people cost, margin), **Monthly Billing** (actual hours from timesheets, adjustments, one-click invoice; status follows the invoice) and a printable **client quote** that never shows the internal allocation.
+- **Projects**: auto IDs from the client code (`ABR-P01`), type (project or care plan), client, resource plan from the rate card (Standard / Floor / Premium / Custom tiers, headcount, hours), quoted vs agreed rates, below-floor warnings, package alternatives, **Agreement** (T&M, Retainer, Blended or Fixed monthly), **Milestones**, **Team & Cost** (assignments, people cost, margin), **Monthly Billing** (actual hours from timesheets, adjustments, one-click invoice; status follows the invoice) and a printable **client quote** that never shows the internal allocation.
 - **Timesheets / People**: weekly hours per person, utilisation, ₹ cost (admin only) and the monthly payroll run.
 - **Invoices / Expenses / Reports**: GST export invoices and payments, spend by bucket, P&L vs plan, cash flow, receivables aging, project profitability and CSV exports.
 - **Quick Calculator**: price a team instantly, compare commercial models, see the US onsite comparison, and save it as a project.

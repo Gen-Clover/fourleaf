@@ -12,6 +12,7 @@
   "dependencies": {
     "@genclover/auth": "*",
     "@genclover/db": "*",
+    "@genclover/ids": "*",
     "@genclover/ui": "*",
     "recharts": "^3.10.1",
     "server-only": "^0.0.1",

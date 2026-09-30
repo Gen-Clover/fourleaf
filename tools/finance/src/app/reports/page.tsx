@@ -83,7 +83,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </div>
           <div className="card overflow-x-auto">
             <div className="card-h"><div className="card-t">Monthly P&L (₹)</div></div>
-            <table className="tbl">
+            <table className="tbl [&_td]:px-2 [&_th]:px-2">
               <thead>
                 <tr><th>Month</th><th className="num">Revenue $</th><th className="num">Revenue ₹</th>{L.buckets.filter((b) => !b.isProfit).map((b) => <th key={b.key} className="num" title={b.name}>{b.name.split(" ")[0]}</th>)}<th className="num">Pass-through net</th><th className="num">FX</th><th className="num">Net profit</th></tr>
               </thead>

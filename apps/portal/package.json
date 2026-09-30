@@ -13,6 +13,8 @@
     "@genclover/auth": "*",
     "@genclover/db": "*",
     "@genclover/finance": "*",
+    "@genclover/ids": "*",
+    "@genclover/lead-finder": "*",
     "@genclover/ui": "*",
     "bcryptjs": "^3.0.3",
     "next": "15.5.26",

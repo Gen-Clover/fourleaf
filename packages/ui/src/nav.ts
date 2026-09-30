@@ -1,22 +1,26 @@
-/** Sidebar menu contract: every tool exports its sections; the portal shell renders them. */
+/** Menu contract: every tool exports its menu; the portal shell renders it as the top navigation bar. */
 export type NavItem = {
   href: string;
   label: string;
   icon: string;
+  /** One line shown under the label in menus, so people find the right page without guessing. */
+  description?: string;
   /** Hidden from VIEWER accounts. */
   editor?: boolean;
 };
 
+/** A titled section is a menu in the top bar (and tabs under it on its pages); an untitled one is plain links. */
 export type NavSection = {
-  /** Section heading; omit for the tool's top-level links. */
   title?: string;
   items: NavItem[];
 };
 
 export type ToolNav = {
-  /** Tool name shown above its sections. */
+  /** Tool name shown next to the logo. */
   tool: string;
+  /** The tool's landing page, opened from the portal home (e.g. /finance). */
+  home: string;
   sections: NavSection[];
-  /** Links shown in the Admin panel (ADMIN only). */
+  /** Settings links (ADMIN only), shown in the gear menu. */
   admin?: NavItem[];
 };

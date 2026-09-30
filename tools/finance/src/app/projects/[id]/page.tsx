@@ -5,7 +5,7 @@ import { hasRole, requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { getBuckets, getParams, parseSnapshot } from "../../../lib/settings";
 import { MODELS, bucketTotal, effectiveRate, floorRate, lineHours, plannedMonthly, premiumRates, quoteSummary, split } from "../../../lib/calc";
-import { currentMonth, date, inr, monthLabel, pct, usd, usd0 } from "@genclover/ui/format";
+import { KIND_LABEL, currentMonth, date, inr, monthLabel, pct, usd, usd0 } from "@genclover/ui/format";
 import { monthRange, ymd } from "../../../lib/finance";
 import ResourceEditor from "./ResourceEditor";
 import { AgreementForm, ProjectInfoForm } from "./ProjectForms";
@@ -44,10 +44,9 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   });
   if (!project) notFound();
 
-  const [p, currentBuckets, clients, roles, people] = await Promise.all([
+  const [p, currentBuckets, roles, people] = await Promise.all([
     getParams(),
     getBuckets(),
-    prisma.client.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.roleRate.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
     tab === "milestones" || tab === "team" ? prisma.person.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }) : [],
   ]);
@@ -65,6 +64,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     id: project.id,
     name: project.name,
     clientId: project.clientId,
+    kind: project.kind,
     status: project.status,
     engagementModel: project.engagementModel,
     startDate: project.startDate?.toISOString() ?? null,
@@ -125,6 +125,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             <span className="font-mono text-xs">{project.code}</span>·
             <Link href={`/clients/${project.clientId}`} className="text-brand-fg hover:underline">{project.client.name}</Link>·
             <StatusBadge status={project.status} />·<span>{MODELS[project.engagementModel]}</span>
+            {project.kind === "CARE" && <>·<span>{KIND_LABEL.CARE}</span></>}
           </span>
         }
         actions={
@@ -161,7 +162,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             <Stat label="Billed to date" value={usd0(billed)} hint={`${project.months.length} month(s)`} />
             <Stat label="Outstanding" value={usd0(outstanding)} hint={`Paid ${usd0(paid)}`} />
           </div>
-          <ProjectInfoForm project={projectDto} clients={clients} readOnly={!canEdit} />
+          <ProjectInfoForm project={projectDto} client={{ code: project.client.code, name: project.client.name }} readOnly={!canEdit} />
           <div className="grid gap-4 md:grid-cols-2">
             <div className="card p-5">
               <div className="card-t mb-3">Allocation — agreed monthly</div>

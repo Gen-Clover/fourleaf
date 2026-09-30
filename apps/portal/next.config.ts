@@ -12,7 +12,7 @@ const repoRoot = path.resolve(__dirname, "../..");
 
 const nextConfig: NextConfig = {
   // Tools and shared packages are TypeScript source in the workspace: compile them with the app.
-  transpilePackages: ["@genclover/auth", "@genclover/db", "@genclover/finance", "@genclover/ui"],
+  transpilePackages: ["@genclover/auth", "@genclover/db", "@genclover/finance", "@genclover/ids", "@genclover/lead-finder", "@genclover/ui"],
   // Prisma's engine must stay a runtime dependency, not be bundled.
   serverExternalPackages: ["@prisma/client", ".prisma/client"],
   outputFileTracingRoot: repoRoot,

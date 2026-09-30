@@ -1,0 +1,18 @@
+{
+  "name": "@genclover/ids",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Readable IDs shared by every tool: lead, client, project and invoice numbers from atomic counters",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@genclover/db": "*"
+  },
+  "scripts": {
+    "backfill": "tsx --env-file-if-exists=../../.env scripts/backfill.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

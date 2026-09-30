@@ -11,7 +11,7 @@ export default async function CalculatorPage() {
     getParams(),
     getBuckets(),
     prisma.roleRate.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
-    prisma.client.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.client.findMany({ orderBy: { name: "asc" }, select: { id: true, code: true, name: true } }),
   ]);
   return (
     <>

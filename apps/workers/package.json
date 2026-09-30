@@ -1,0 +1,17 @@
+{
+  "name": "@genclover/workers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Background worker: runs every tool's jobs (Lead Finder searches, website audits)",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
+    "start": "tsx --env-file-if-exists=../../.env src/index.ts"
+  },
+  "dependencies": {
+    "@genclover/db": "*",
+    "@genclover/lead-finder": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

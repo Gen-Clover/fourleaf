@@ -40,6 +40,8 @@ model Setting {
 
 model Client {
   id             String    @id @default(cuid()) @map("_id")
+  number         String    @unique // Client ID, GC-YYYY-NNNN (system, never changes)
+  code           String    @unique // Client code, e.g. ABR (chosen at onboarding, then locked): project IDs, Jira, folders, emails
   name           String
   contactName    String?
   email          String?
@@ -54,6 +56,7 @@ model Client {
   updatedAt      DateTime  @updatedAt
   projects       Project[]
   invoices       Invoice[]
+  leads          Lead[]
 }
 
 model AuditLog {
@@ -68,4 +71,43 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+/// Named counters for readable IDs (packages/ids). key examples: "client:2026", "project:<clientId>",
+/// "invoice:GCI/26-27", "lead:2026-09". value = the last number handed out.
+model Sequence {
+  key   String @id @map("_id")
+  value Int
+}
+
+/// Background work for apps/workers (searches, website audits…). Any tool can add a job type.
+/// status: QUEUED | RUNNING | DONE | FAILED | PAUSED | CANCELLED. group ties a job to its parent (e.g. a search).
+model Job {
+  id         String    @id @default(cuid()) @map("_id")
+  type       String
+  payload    String // JSON
+  group      String?
+  status     String    @default("QUEUED")
+  attempts   Int       @default(0)
+  runAfter   DateTime  @default(now())
+  lockedAt   DateTime?
+  error      String?
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([status, runAfter])
+  @@index([group, status])
+}
+
+/// Small pieces of system state (e.g. the last email checked in the inbox). Not user settings.
+model SystemState {
+  key       String   @id @map("_id")
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Paid API calls per month (key = "YYYY-MM:SKU"), for spend estimates and monthly caps.
+model ApiUsage {
+  key   String @id @map("_id")
+  count Int    @default(0)
 }

@@ -99,7 +99,7 @@ export async function computeAlerts(snap: Awaited<ReturnType<typeof cfoSnapshot>
   // ---- Receivables & delivery ----
   const overdue = open.filter((i) => i.aging !== "Not due");
   if (overdue.length) a.push({ level: overdue.some((i) => i.aging === "61–90" || i.aging === "90+") ? "warning" : "attention", title: `${overdue.length} client payment(s) overdue`, detail: `$${Math.round(overdue.reduce((x, i) => x + i.balance, 0)).toLocaleString("en-US")} past due.`, href: "/reports?tab=receivables" });
-  if (lateMs) a.push({ level: "attention", title: `${lateMs} milestone(s) late`, detail: "Past due and not done on active projects.", href: "/" });
+  if (lateMs) a.push({ level: "attention", title: `${lateMs} milestone(s) late`, detail: "Past due and not done on active projects.", href: "/finance" });
   if (snap.bankCash >= s.minCashInr && snap.availableCash > 0 && !a.some((x) => x.level === "critical")) a.push({ level: "healthy", title: "Cash covers all near-term obligations", detail: `${L(snap.availableCash)} available after ${s.horizonDays}-day commitments.` });
 
   const rank: Record<Level, number> = { critical: 0, warning: 1, attention: 2, healthy: 3 };

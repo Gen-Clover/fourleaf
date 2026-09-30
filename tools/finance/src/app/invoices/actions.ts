@@ -185,7 +185,7 @@ export async function recordPayment(invoiceId: string, input: unknown): Promise<
     });
     await audit(user, "CREATE", "Payment", invoiceId, `${inv.number}: received $${d.amountUsd.toFixed(2)} = ₹${d.inrReceived.toFixed(0)} (charges ₹${d.bankChargesInr.toFixed(0)})`);
     touch(invoiceId);
-    revalidatePath("/");
+    revalidatePath("/finance");
     return { ok: true, message: res.status === "PAID" ? "Payment recorded — invoice fully paid." : "Payment recorded." };
   } catch (e) {
     return fail(e);

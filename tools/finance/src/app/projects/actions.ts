@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@genclover/db";
+import * as ids from "@genclover/ids";
 import { assertRole } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
 import { getBuckets, getParams } from "../../lib/settings";
 import { effectiveRate, floorRate, monthlyRevenue, premiumRates } from "../../lib/calc";
 import { monthRange } from "../../lib/finance";
-import { PROJECT_STATUSES, TIERS } from "@genclover/ui/format";
+import { PROJECT_KINDS, PROJECT_STATUSES, TIERS } from "@genclover/ui/format";
 
 export type Result = { ok: boolean; message: string } | undefined;
 
@@ -28,15 +29,16 @@ const ProjectInfo = z.object({
   description: optStr,
   probability: z.string().trim().transform((s) => (s === "" ? null : Math.round(Number(s)))).pipe(z.number().min(0).max(100, "Probability is 0–100%").nullable()).optional(),
   expectedCloseDate: optDate,
+  kind: z.enum(PROJECT_KINDS).default("PROJECT"),
 });
 
-async function nextCode() {
-  const { projectCodePrefix } = await getParams();
-  const year = new Date().getFullYear();
-  const prefix = `${projectCodePrefix}-${year}-`;
-  const last = await prisma.project.findFirst({ where: { code: { startsWith: prefix } }, orderBy: { code: "desc" } });
-  const n = last ? Number(last.code.slice(prefix.length)) + 1 : 1;
-  return `${prefix}${String(n).padStart(4, "0")}`;
+/** The client is fixed once the project exists: its ID (ABR-P01) belongs to that client. */
+const ProjectUpdate = ProjectInfo.omit({ clientId: true });
+
+/** Next ID for a project of this client: ABR-P01, ABR-P02 … */
+async function nextCode(clientId: string) {
+  const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId }, select: { id: true, code: true } });
+  return ids.nextProjectCode(prisma, client);
 }
 
 export async function createProject(_: Result, fd: FormData): Promise<Result> {
@@ -46,7 +48,7 @@ export async function createProject(_: Result, fd: FormData): Promise<Result> {
     const d = ProjectInfo.parse(Object.fromEntries(fd));
     const buckets = await getBuckets();
     const p = await getParams();
-    const code = await nextCode();
+    const code = await nextCode(d.clientId);
     const project = await prisma.project.create({
       data: {
         ...d,
@@ -84,7 +86,7 @@ export async function createProjectFromCalculator(input: unknown): Promise<Resul
       .parse(input);
     const [p, buckets, roles] = await Promise.all([getParams(), getBuckets(), prisma.roleRate.findMany()]);
     const roleById = new Map(roles.map((r) => [r.id, r]));
-    const code = await nextCode();
+    const code = await nextCode(d.clientId);
     const project = await prisma.project.create({
       data: {
         code,
@@ -118,7 +120,7 @@ export async function createProjectFromCalculator(input: unknown): Promise<Resul
 export async function updateProject(id: string, _: Result, fd: FormData): Promise<Result> {
   try {
     const user = await assertRole("EDITOR");
-    const d = ProjectInfo.parse(Object.fromEntries(fd));
+    const d = ProjectUpdate.parse(Object.fromEntries(fd));
     const prev = await prisma.project.findUniqueOrThrow({ where: { id } });
     await prisma.project.update({ where: { id }, data: d });
     const changes = [prev.status !== d.status && `status ${prev.status} → ${d.status}`, prev.engagementModel !== d.engagementModel && `model ${prev.engagementModel} → ${d.engagementModel}`].filter(Boolean);

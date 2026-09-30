@@ -5,15 +5,16 @@
   "description": "Shared MongoDB schema and Prisma client for every portal tool",
   "exports": {
     ".": "./src/index.ts",
-    "./audit": "./src/audit.ts"
+    "./audit": "./src/audit.ts",
+    "./jobs": "./src/jobs.ts"
   },
   "scripts": {
     "generate": "prisma generate",
-    "push": "prisma db push --skip-generate && tsx scripts/after-push.ts",
+    "push": "prisma db push --skip-generate && tsx --env-file-if-exists=../../.env scripts/after-push.ts",
     "seed": "prisma db seed",
-    "setup": "npm run push && npm run seed",
-    "migrate:sqlite": "tsx scripts/migrate-from-sqlite.ts",
-    "postinstall": "prisma generate"
+    "migrate:sqlite": "tsx --env-file-if-exists=../../.env scripts/migrate-from-sqlite.ts",
+    "postinstall": "prisma generate",
+    "local": "tsx scripts/local-mongo.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
+    "mongodb-memory-server": "^11.3.0",
     "tsx": "^4.23.15",
     "typescript": "^5"
   }

@@ -6,6 +6,13 @@ import { getBuckets, getParams } from "../../lib/settings";
 import { roleMetrics, split } from "../../lib/calc";
 import { num, pct, usd, usd0 } from "@genclover/ui/format";
 
+/** The 65 / 10 / 25 model: each fund's share is in "Allocation per $100" below the table. */
+const CATEGORIES = [
+  ["delivery", "Delivery"],
+  ["growth", "Growth"],
+  ["corporate", "Corporate"],
+] as const;
+
 export default async function RateCardPage() {
   const user = await requireUser();
   const [roles, p, buckets] = await Promise.all([
@@ -23,21 +30,19 @@ export default async function RateCardPage() {
       />
 
       <div className="card overflow-x-auto">
-        <table className="tbl">
+        <table className="tbl [&_td]:px-2 [&_th]:px-2 [&_th]:whitespace-normal">
           <thead>
             <tr>
-              <th>#</th>
               <th>Role / Domain</th>
-              <th>Family</th>
               <th className="num">India Market</th>
               <th className="num">US Salary</th>
               <th className="num">US Loaded</th>
               <th className="num">GC Standard</th>
               <th className="num">Floor</th>
               <th className="num">Premium</th>
-              {buckets.map((b) => (
-                <th key={b.key} className="num" title={b.name}>
-                  {b.name.split(" ")[0]} {b.percent}%
+              {CATEGORIES.map(([key, label]) => (
+                <th key={key} className="num" title={`${label} share of the Standard rate, per hour`}>
+                  {label} {Math.round(split(100, buckets)[key])}%
                 </th>
               ))}
               <th className="num">Savings vs US</th>
@@ -47,22 +52,23 @@ export default async function RateCardPage() {
             </tr>
           </thead>
           <tbody>
-            {roles.map((r, i) => {
+            {roles.map((r) => {
               const m = roleMetrics(r, p, buckets);
               const s = split(r.standardRate, buckets);
               return (
                 <tr key={r.id}>
-                  <td className="text-neutral-400">{i + 1}</td>
-                  <td className="font-medium whitespace-nowrap">{r.name}</td>
-                  <td className="text-xs whitespace-nowrap text-neutral-500">{r.family}</td>
+                  <td className="min-w-44">
+                    <div className="font-medium">{r.name}</div>
+                    <div className="text-xs text-neutral-500">{r.family}</div>
+                  </td>
                   <td className="num">${r.marketMin}–{r.marketMax}</td>
                   <td className="num">{usd0(r.usSalary)}</td>
                   <td className="num">{usd0(m.usLoaded)}</td>
                   <td className="num font-semibold text-brand-fg">{usd(r.standardRate)}</td>
                   <td className="num">{usd(m.floor)}</td>
                   <td className="num">{m.premium.min === m.premium.max ? `$${m.premium.min}` : `$${m.premium.min}–${m.premium.max}`}</td>
-                  {s.lines.map((l) => (
-                    <td key={l.key} className="num text-neutral-600">{usd(l.amount)}</td>
+                  {CATEGORIES.map(([key]) => (
+                    <td key={key} className="num text-neutral-600">{usd(s[key])}</td>
                   ))}
                   <td className="num">~{pct(m.savings)}</td>
                   <td className="num">{pct(m.position)}</td>

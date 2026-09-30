@@ -1,0 +1,257 @@
+// Lead Finder tool: searches, leads, website audits, activity, email. Leads link to Client (core) on conversion.
+//
+// Google Maps Platform terms: only the Google Place ID may be kept indefinitely. Fields copied from Google
+// (name, address, phone, rating…) carry googleFetchedAt; the worker refreshes them for leads still being
+// worked and clears them from closed leads after 30 days. Audit results and activity are our own data.
+
+/// A niche preset: the phrases one search runs for this kind of business.
+/// value: HIGH | MEDIUM | LOW (how much a lead in this niche is usually worth).
+/// bookingRelevant = online booking is a sensible upsell (clinics, hotels, salons…).
+model LeadNiche {
+  key             String   @id @map("_id")
+  label           String
+  phrases         String[]
+  market          String   @default("IN") // IN | US (lib/markets.ts)
+  value           String   @default("MEDIUM")
+  bookingRelevant Boolean  @default(false)
+  active          Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  updatedAt       DateTime @updatedAt
+}
+
+/// service: ALL or a service key (lib/services.ts). depth: QUICK | THOROUGH.
+/// areas = JSON [{ name, south, west, north, east }] from geocoding each place typed in.
+/// saturated = one JSON { phrase, rect, area } per quick-search query that hit Google's 60 limit (can go thorough).
+/// status: QUEUED | RUNNING | PAUSED | DONE | STOPPED | FAILED
+model LeadSearch {
+  id          String      @id @default(cuid()) @map("_id")
+  service     String      @default("ALL")
+  nicheKey    String?
+  nicheLabel  String
+  market      String      @default("IN")
+  phrases     String[]
+  areaLabel   String
+  areas       String
+  depth       String      @default("THOROUGH")
+  status      String      @default("QUEUED")
+  requests    Int         @default(0)
+  found       Int         @default(0)
+  newLeads    Int         @default(0)
+  cellsTotal  Int         @default(0)
+  cellsDone   Int         @default(0)
+  estimateMin Int         @default(0)
+  estimateMax Int         @default(0)
+  saturated   String[]
+  scheduleId  String?
+  error       String?
+  createdById String?
+  createdBy   String
+  createdAt   DateTime    @default(now())
+  finishedAt  DateTime?
+  hits        SearchHit[]
+
+  @@index([createdAt])
+}
+
+/// A search that repeats every week (only new businesses become leads). config = JSON of the search input
+/// with its resolved areas, so a scheduled run doesn't pay for area lookups again.
+model LeadSchedule {
+  id          String    @id @default(cuid()) @map("_id")
+  name        String
+  config      String
+  dayOfWeek   Int // 0 = Sunday … 6 = Saturday (IST)
+  hour        Int // 0–23 IST
+  active      Boolean   @default(true)
+  nextRunAt   DateTime
+  lastRunAt   DateTime?
+  lastSearchId String?
+  createdBy   String
+  createdAt   DateTime  @default(now())
+
+  @@index([active, nextRunAt])
+}
+
+/// stage: NEW | QUALIFIED | CONTACTED | REPLIED | MEETING | PROPOSAL | WON | LOST | NOT_A_FIT
+/// source: MAPS | MANUAL | WALK_IN | REFERRAL | WARM
+/// Scores are 0–100 per service (0 = no opportunity); bestScore/bestService = the highest of them.
+model Lead {
+  id              String         @id @default(cuid()) @map("_id")
+  code            String         @unique // GL-YYYY-MM-XXXXXX (packages/ids)
+  // Unique when set: partial unique index in scripts/after-push.ts (manual leads have none).
+  placeId         String?
+  source          String         @default("MAPS")
+  market          String         @default("IN") // IN | US
+  nicheKey        String?
+  name            String
+  // Google fields (see googleFetchedAt)
+  primaryType     String?
+  address         String?
+  lat             Float?
+  lng             Float?
+  phone           String?
+  intlPhone       String?
+  mapsUrl         String?
+  rating          Float?
+  reviewCount     Int?
+  hasHours        Boolean?
+  photoCount      Int?
+  businessStatus  String?
+  googleFetchedAt DateTime? // when Google data was last fetched (search or refresh)
+  // Website (from Google or entered by hand) and the latest audit
+  website         String?
+  auditStatus     String         @default("PENDING") // PENDING | DONE | FAILED | NONE (no website)
+  siteState       String         @default("PENDING") // NONE | PENDING | SOCIAL | DOWN | OK (from the latest audit)
+  auditedAt       DateTime?
+  // Contact details: typed in, or found on the website
+  area            String?
+  contactName     String? // typed in
+  personName      String? // found: "Dr. Sharma" (Google name or website)
+  email           String?
+  emails          String[] // all addresses found on the website
+  emailBounced    Boolean        @default(false)
+  whatsappNumber  String? // found in a WhatsApp link on the website
+  socials         String? // JSON { facebook, instagram, linkedin, youtube }
+  // Branches: leads sharing a website or name are one business; the one with most reviews leads
+  brandKey        String?
+  branchCount     Int            @default(1)
+  branchOfId      String?
+  // Working state
+  stage           String         @default("NEW")
+  lostReason      String?
+  doNotContact    Boolean        @default(false)
+  nextFollowUpAt  DateTime?
+  lastContactAt   DateTime?
+  firstContactAt  DateTime?
+  repliedAt       DateTime?
+  contactCount    Int            @default(0) // messages sent: 0 = not contacted, 1 = first message, 2–4 = follow-ups
+  lastChannel     String? // WHATSAPP | EMAIL | CALL | VISIT
+  firstService    String? // service the first message was about (reports)
+  ownerId         String?
+  ownerName       String?
+  // Claude review (pasted in by hand from claude.ai; lib/brief.ts)
+  claudeFit       String? // HIGH | MEDIUM | LOW
+  claudeService   String?
+  claudeSummary   String?
+  claudeMessage   String?
+  claudeAt        DateTime?
+  // Scores
+  ability         Int            @default(0)
+  sNewWebsite     Int            @default(0)
+  sRedesign       Int            @default(0)
+  sLeadCapture    Int            @default(0)
+  sGoogleProfile  Int            @default(0)
+  sSeoSpeed       Int            @default(0)
+  sBooking        Int            @default(0)
+  sAiAutomation   Int            @default(0)
+  bestScore       Int            @default(0)
+  bestService     String?
+  reasons         String? // JSON [{ service, points, text }]
+  clientId        String?
+  client          Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  hits            SearchHit[]
+  audits          WebsiteAudit[]
+  activities      LeadActivity[]
+  emailsSent      EmailMessage[]
+
+  @@index([stage, bestScore])
+  @@index([nextFollowUpAt])
+  @@index([nicheKey])
+  @@index([brandKey])
+  @@index([googleFetchedAt])
+}
+
+/// Which searches found which lead (isNew = the search created it).
+model SearchHit {
+  id       String     @id @default(cuid()) @map("_id")
+  searchId String
+  search   LeadSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  leadId   String
+  lead     Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  isNew    Boolean    @default(false)
+
+  @@unique([searchId, leadId])
+  @@index([leadId])
+}
+
+/// One check of a lead's website (home page + contact page). psiMobile = Google PageSpeed mobile score 0–100.
+model WebsiteAudit {
+  id              String   @id @default(cuid()) @map("_id")
+  leadId          String
+  lead            Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  url             String
+  finalUrl        String?
+  reachable       Boolean  @default(false)
+  socialOnly      Boolean  @default(false)
+  httpStatus      Int?
+  error           String?
+  https           Boolean  @default(false)
+  responseMs      Int?
+  mobileViewport  Boolean  @default(false)
+  hasWhatsApp     Boolean  @default(false)
+  hasForm         Boolean  @default(false)
+  hasTel          Boolean  @default(false)
+  phoneShown      Boolean  @default(false) // number written on the page, not necessarily tap-to-call
+  hasEmail        Boolean  @default(false)
+  hasBooking      Boolean  @default(false)
+  hasChatBot      Boolean  @default(false) // a chat assistant (Tawk, Tidio, WATI…)
+  hasFaq          Boolean  @default(false)
+  title           String?
+  metaDescription Boolean  @default(false)
+  hasH1           Boolean  @default(false)
+  copyrightYear   Int?
+  platform        String?
+  adsDetected     Boolean  @default(false)
+  analytics       Boolean  @default(false)
+  jsRendered      Boolean  @default(false) // page built in the browser: content checks skipped
+  sitemap         Boolean?
+  emails          String[]
+  whatsappNumber  String?
+  socials         String? // JSON { facebook, instagram, linkedin, youtube }
+  personName      String?
+  psiMobile       Int?
+  psiAt           DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+/// type: NOTE | WHATSAPP | EMAIL | CALL | VISIT | STAGE | SYSTEM | REPLY
+/// step: for messages, 0 = first message, 1–3 = follow-ups (reports)
+model LeadActivity {
+  id      String   @id @default(cuid()) @map("_id")
+  leadId  String
+  lead    Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type    String
+  service String?
+  step    Int?
+  text    String
+  byId    String?
+  byName  String
+  at      DateTime @default(now())
+
+  @@index([leadId, at])
+  @@index([type, at])
+}
+
+/// Emails sent from the portal. status: SENT | REPLIED | BOUNCED. messageId matches replies (In-Reply-To).
+model EmailMessage {
+  id        String    @id @default(cuid()) @map("_id")
+  leadId    String
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messageId String    @unique
+  to        String
+  subject   String
+  body      String
+  step      Int       @default(0)
+  service   String?
+  status    String    @default("SENT")
+  auto      Boolean   @default(false) // sent by the worker (automatic follow-up)
+  sentAt    DateTime  @default(now())
+  repliedAt DateTime?
+
+  @@index([leadId])
+  @@index([to])
+  @@index([sentAt])
+}

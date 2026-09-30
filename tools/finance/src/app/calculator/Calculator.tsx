@@ -10,7 +10,7 @@ export type CalcRole = { id: string; name: string; standard: number; floor: numb
 type L = { roleId: string; headcount: number; hoursPerMonth: number; tier: string; quotedRate: number };
 type Pkg = { blendedRate: number; retainerAmount: number; retainerHours: number; additionalHourRate: number };
 
-export default function Calculator({ roles, buckets, pkg, clients, canSave }: { roles: CalcRole[]; buckets: Bucket[]; pkg: Pkg; clients: { id: string; name: string }[]; canSave: boolean }) {
+export default function Calculator({ roles, buckets, pkg, clients, canSave }: { roles: CalcRole[]; buckets: Bucket[]; pkg: Pkg; clients: { id: string; code: string; name: string }[]; canSave: boolean }) {
   const router = useRouter();
   const byId = new Map(roles.map((r) => [r.id, r]));
   const rateFor = (roleId: string, tier: string, current = 0) => {
@@ -123,7 +123,7 @@ export default function Calculator({ roles, buckets, pkg, clients, canSave }: { 
             <label className="label">Client</label>
             <select className="input" value={save.clientId} onChange={(e) => setSave({ ...save, clientId: e.target.value })}>
               <option value="">Select…</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}
             </select>
           </div>
           <button

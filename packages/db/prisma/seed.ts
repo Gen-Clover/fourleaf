@@ -6,7 +6,6 @@ import { prisma } from "../src/index";
 const settings = [
   // Company
   { key: "companyName", value: "Gen Clover", label: "Company name", group: "Company", type: "text" },
-  { key: "projectCodePrefix", value: "GC", label: "Project ID prefix", group: "Company", type: "text", description: "Project IDs are generated as PREFIX-YYYY-0001" },
   // Market / cost assumptions
   { key: "fxRate", value: "88", label: "FX rate", group: "Cost assumptions", unit: "₹ per US$", description: "Used for Delivery Pool ₹ lakh/yr" },
   { key: "billableHoursPerYear", value: "1920", label: "Billable hours / year (India)", group: "Cost assumptions", unit: "hrs", description: "160 × 12" },
@@ -32,7 +31,7 @@ const settings = [
   { key: "lutNumber", value: "", label: "LUT ARN", group: "Invoicing", type: "text", description: "Export under LUT without payment of IGST" },
   { key: "sacCode", value: "998314", label: "SAC code", group: "Invoicing", type: "text", description: "998314 = IT design & development services" },
   { key: "bankDetails", value: "", label: "Bank / remittance details", group: "Invoicing", type: "text", description: "Beneficiary, account, SWIFT — printed on invoices" },
-  { key: "invoicePrefix", value: "GC", label: "Invoice number prefix", group: "Invoicing", type: "text", description: "Invoices are numbered PREFIX/26-27/0001 per financial year" },
+  { key: "invoicePrefix", value: "GCI", label: "Invoice number prefix", group: "Invoicing", type: "text", description: "Invoices are numbered PREFIX/26-27/0001: one consecutive series per financial year (GST). Change it only before a year's first invoice." },
   { key: "paymentTermsDays", value: "30", label: "Payment terms", group: "Invoicing", unit: "days" },
   // Treasury & alerts (CFO dashboard)
   { key: "runwayTargetMonths", value: "12", label: "Survival runway target", group: "Treasury & alerts", unit: "months", description: "Survival fund ÷ monthly unavoidable burn" },
@@ -41,6 +40,51 @@ const settings = [
   { key: "benchMaxPct", value: "10", label: "Bench tolerance", group: "Treasury & alerts", unit: "%", description: "Share of team capacity not staffed on billable work" },
   { key: "commitmentHorizonDays", value: "30", label: "Commitment horizon", group: "Treasury & alerts", unit: "days", description: "Obligations due within this window reduce available funds" },
   { key: "paymentLagMonths", value: "2", label: "Payment lag", group: "Treasury & alerts", unit: "months", description: "Months from starting work to first cash (bill in arrears + terms)" },
+  // Lead Finder (edited under Lead Finder → Settings). Google prices: Maps Platform price list, Sep 2026.
+  { key: "lfMonthlyBudgetUsd", value: "10", label: "Monthly Google spend cap", group: "Lead Finder", unit: "US$", description: "Searches pause when this month's estimated spend would pass it. 0 = free allowance only." },
+  { key: "lfSearchPricePer1000", value: "35", label: "Text Search (Enterprise) price", group: "Lead Finder", unit: "US$ / 1,000", description: "Each page of up to 20 results is one request" },
+  { key: "lfSearchFreePerMonth", value: "1000", label: "Text Search free requests", group: "Lead Finder", unit: "per month" },
+  { key: "lfAreaPricePer1000", value: "32", label: "Area lookup (Text Search Pro) price", group: "Lead Finder", unit: "US$ / 1,000", description: "Finding the boundary of each place you type" },
+  { key: "lfAreaFreePerMonth", value: "5000", label: "Area lookup free requests", group: "Lead Finder", unit: "per month" },
+  { key: "lfDetailsPricePer1000", value: "20", label: "Place Details (Enterprise) price", group: "Lead Finder", unit: "US$ / 1,000", description: "Refreshing Google data for leads you are still working" },
+  { key: "lfDetailsFreePerMonth", value: "1000", label: "Place Details free requests", group: "Lead Finder", unit: "per month" },
+  { key: "lfCellKm", value: "4", label: "Search grid cell size", group: "Lead Finder", unit: "km", description: "Thorough searches start with cells this wide and split busy ones" },
+  { key: "lfMinCellKm", value: "0.5", label: "Smallest grid cell", group: "Lead Finder", unit: "km" },
+  { key: "lfHotScore", value: "70", label: "Hot lead score", group: "Lead Finder", unit: "0–100" },
+  { key: "lfWarmScore", value: "45", label: "Warm lead score", group: "Lead Finder", unit: "0–100" },
+  { key: "lfAutoQualifyScore", value: "85", label: "Qualify automatically at score", group: "Lead Finder", unit: "0–100", description: "New leads at or above this score, with a phone or email, become Qualified. 0 = off." },
+  { key: "lfChainBranches", value: "6", label: "Big chain at branches", group: "Lead Finder", unit: "branches", description: "Businesses with this many branches are marked Not a fit. 0 = off." },
+  { key: "lfNightlySpeedTests", value: "40", label: "Nightly speed tests", group: "Lead Finder", unit: "leads", description: "Google PageSpeed runs each night (2 AM IST) on the best leads with websites. 0 = off." },
+  { key: "lfDailyNewContacts", value: "30", label: "New contacts per day", group: "Lead Finder", unit: "leads", description: "First messages the Today queue offers each day, on top of due follow-ups" },
+  { key: "lfEmailDailyLimit", value: "40", label: "Emails per day", group: "Lead Finder", unit: "emails", description: "Most emails the portal sends in a day, to protect the sending domain" },
+  { key: "lfAutoEmailFollowUps", value: "0", label: "Send email follow-ups automatically", group: "Lead Finder", unit: "1 = on", description: "After a person sends the first email, the worker sends follow-ups during business hours. Stops on reply." },
+  { key: "lfNoReplyDays", value: "7", label: "Close as No reply after", group: "Lead Finder", unit: "days", description: "Days after the last follow-up with no reply. 0 = off." },
+];
+
+// Lead Finder niche presets (strategy doc, section 3). Phrases are what each search asks Google for.
+const niches: { key: string; label: string; phrases: string[]; market?: string; value: string; bookingRelevant?: boolean }[] = [
+  { key: "immigration", label: "Immigration & study-abroad consultants", phrases: ["immigration consultant", "visa consultant", "study abroad consultant", "IELTS coaching", "PR visa consultant"], value: "HIGH" },
+  { key: "dental", label: "Dental clinics", phrases: ["dentist", "dental clinic", "orthodontist"], value: "HIGH", bookingRelevant: true },
+  { key: "skin-hair", label: "Skin & hair clinics", phrases: ["dermatologist", "skin clinic", "hair transplant clinic"], value: "HIGH", bookingRelevant: true },
+  { key: "ivf", label: "IVF & fertility centres", phrases: ["IVF centre", "fertility clinic"], value: "HIGH", bookingRelevant: true },
+  { key: "physio", label: "Physiotherapy clinics", phrases: ["physiotherapist", "physiotherapy clinic"], value: "MEDIUM", bookingRelevant: true },
+  { key: "real-estate", label: "Real estate brokers & builders", phrases: ["real estate agent", "property dealer", "builder developer"], value: "HIGH" },
+  { key: "hotels", label: "Hotels, homestays & resorts", phrases: ["hotel", "homestay", "resort"], value: "MEDIUM", bookingRelevant: true },
+  { key: "manufacturers", label: "Manufacturers & exporters", phrases: ["manufacturer", "exporter", "industrial supplier"], value: "MEDIUM" },
+  { key: "interiors", label: "Interior designers & architects", phrases: ["interior designer", "architect"], value: "MEDIUM" },
+  { key: "ca-law", label: "CA & law firms", phrases: ["chartered accountant", "law firm", "advocate"], value: "MEDIUM" },
+  { key: "coaching", label: "Coaching institutes", phrases: ["coaching institute", "tuition centre"], value: "MEDIUM" },
+  { key: "gyms-salons", label: "Premium gyms & salons", phrases: ["gym", "fitness centre", "beauty salon", "unisex salon"], value: "LOW", bookingRelevant: true },
+  { key: "us-home", label: "US home services", phrases: ["roofing contractor", "HVAC contractor", "landscaping company", "cleaning service"], market: "US", value: "HIGH" },
+  { key: "us-clinics", label: "US dentists & med spas", phrases: ["dentist", "med spa"], market: "US", value: "HIGH", bookingRelevant: true },
+  { key: "us-lawyers", label: "US law firms", phrases: ["personal injury lawyer", "family lawyer"], market: "US", value: "HIGH" },
+  { key: "us-plumbers", label: "US plumbers", phrases: ["plumber", "emergency plumber", "drain cleaning"], market: "US", value: "HIGH" },
+  { key: "us-hvac", label: "US HVAC", phrases: ["HVAC contractor", "air conditioning repair", "furnace repair"], market: "US", value: "HIGH" },
+  { key: "us-roofers", label: "US roofers", phrases: ["roofing contractor", "roof repair"], market: "US", value: "HIGH" },
+  { key: "us-chiro", label: "US chiropractors", phrases: ["chiropractor", "chiropractic clinic"], market: "US", value: "MEDIUM", bookingRelevant: true },
+  { key: "us-medspa", label: "US med spas", phrases: ["med spa", "medical spa", "botox clinic"], market: "US", value: "HIGH", bookingRelevant: true },
+  { key: "us-dental", label: "US dentists", phrases: ["dentist", "cosmetic dentist", "family dentistry"], market: "US", value: "HIGH", bookingRelevant: true },
+  { key: "us-law", label: "US law firms (all)", phrases: ["personal injury lawyer", "family law attorney", "criminal defense attorney", "estate planning attorney"], market: "US", value: "HIGH" },
 ];
 
 // Allocation policies by company stage. Keys = AllocationBucket keys; each policy totals 100%.
@@ -150,6 +194,10 @@ async function main() {
     await prisma.expenseCategory.upsert({ where: { name }, update: {}, create: { name, bucketKey, sortOrder: i } });
   }
 
+  for (const [i, n] of niches.entries()) {
+    await prisma.leadNiche.upsert({ where: { key: n.key }, update: {}, create: { market: "IN", bookingRelevant: false, ...n, sortOrder: i } });
+  }
+
   // Research naming: Risk → Working Capital (only if still on the old default name)
   await prisma.allocationBucket.updateMany({ where: { key: "risk", name: "Risk / Working Capital" }, data: { name: "Working Capital / Risk" } });
 
@@ -174,9 +222,11 @@ async function main() {
   });
 
   // Sample client + project = the md "Sample Monthly Retainer (160 hrs)"
-  if ((await prisma.project.count()) === 0) {
+  if ((await prisma.project.count()) === 0 && (await prisma.client.count()) === 0) {
+    // Readable IDs as packages/ids would hand them out, with their counters (GC-YYYY-0001, SAM-P01).
+    const year = new Date().getFullYear();
     const client = await prisma.client.create({
-      data: { name: "Sample Client Inc.", contactName: "Jane Doe", email: "jane@example.com", country: "USA", city: "Austin, TX", timezone: "America/Chicago", notes: "Demo record seeded from the rate card sample retainer." },
+      data: { number: `GC-${year}-0001`, code: "SAM", name: "Sample Client Inc.", contactName: "Jane Doe", email: "jane@example.com", country: "USA", city: "Austin, TX", timezone: "America/Chicago", notes: "Demo record seeded from the rate card sample retainer." },
     });
     const allBuckets = await prisma.allocationBucket.findMany({ orderBy: { sortOrder: "asc" } });
     const snapshot = JSON.stringify(allBuckets.map(({ key, name, percent, category, isProfit }) => ({ key, name, percent, category, isProfit })));
@@ -189,10 +239,11 @@ async function main() {
       ["DevOps", "DevOps / Cloud Engineer", 10],
       ["Documentation / Client Communication", "Documentation / Client Communication", 5],
     ];
-    const year = new Date().getFullYear();
+    await prisma.sequence.upsert({ where: { key: `client:${year}` }, create: { key: `client:${year}`, value: 1 }, update: {} });
+    await prisma.sequence.upsert({ where: { key: `project:${client.id}` }, create: { key: `project:${client.id}`, value: 1 }, update: {} });
     await prisma.project.create({
       data: {
-        code: `GC-${year}-0001`,
+        code: "SAM-P01",
         name: "Product Engineering Retainer",
         clientId: client.id,
         status: "ACTIVE",

@@ -23,11 +23,13 @@ export default async function ClientsPage() {
         ) : (
           <table className="tbl">
             <thead>
-              <tr><th>Client</th><th>Contact</th><th>Email</th><th>Location</th><th className="num">Projects</th><th className="num">Active</th><th className="num">Billed to date</th></tr>
+              <tr><th>Client ID</th><th>Code</th><th>Client</th><th>Contact</th><th>Email</th><th>Location</th><th className="num">Projects</th><th className="num">Active</th><th className="num">Billed to date</th></tr>
             </thead>
             <tbody>
               {clients.map((c) => (
                 <tr key={c.id}>
+                  <td className="font-mono text-xs">{c.number}</td>
+                  <td className="font-mono text-xs">{c.code}</td>
                   <td><Link href={`/clients/${c.id}`} className="font-medium text-brand-fg hover:underline">{c.name}</Link></td>
                   <td>{c.contactName ?? "—"}</td>
                   <td>{c.email ?? "—"}</td>

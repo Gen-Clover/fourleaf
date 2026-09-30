@@ -52,3 +52,6 @@ data-export/
 .vscode/
 .idea/
 Thumbs.db
+
+# Local MongoDB data (npm run db:local)
+.mongo-data/

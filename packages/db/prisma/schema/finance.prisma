@@ -36,9 +36,11 @@ model RoleRate {
 
 /// status: DRAFT | QUOTED | NEGOTIATION | ACTIVE | ON_HOLD | COMPLETED | CANCELLED
 /// engagementModel: TM | RETAINER | BLENDED | FIXED
+/// kind: PROJECT | CARE (a care plan after go-live is its own project, usually a retainer)
 model Project {
   id                 String            @id @default(cuid()) @map("_id")
-  code               String            @unique
+  code               String            @unique // <client code>-P01, e.g. ABR-P01 (packages/ids)
+  kind               String            @default("PROJECT")
   name               String
   clientId           String
   client             Client            @relation(fields: [clientId], references: [id])

@@ -10,7 +10,7 @@ import PrintButton from "../../../projects/[id]/quote/PrintButton";
 export default async function InvoicePrint({ params }: { params: Promise<{ id: string }> }) {
   await requireUser();
   const { id } = await params;
-  const inv = await prisma.invoice.findUnique({ where: { id }, include: { client: true, lines: { orderBy: { sortOrder: "asc" } }, payments: true } });
+  const inv = await prisma.invoice.findUnique({ where: { id }, include: { client: true, project: { select: { code: true, name: true } }, lines: { orderBy: { sortOrder: "asc" } }, payments: true } });
   if (!inv) notFound();
   const s = await getInvoiceSettings();
   const paid = paidUsd(inv.payments);
@@ -47,6 +47,8 @@ export default async function InvoicePrint({ params }: { params: Promise<{ id: s
           <div>Place of supply: Outside India ({inv.client.country ?? "USA"})</div>
           <div>SAC: {s.sac}</div>
           <div>Currency: {inv.currency}</div>
+          <div>Client ID: <span className="font-mono">{inv.client.number}</span> ({inv.client.code})</div>
+          {inv.project && <div>Project: <span className="font-mono">{inv.project.code}</span> {inv.project.name}</div>}
         </div>
       </div>
 

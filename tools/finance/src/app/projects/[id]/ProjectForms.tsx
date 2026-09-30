@@ -2,13 +2,14 @@
 
 import { useActionState, useState } from "react";
 import { type Bucket, MODELS, type ResourceLine, monthlyRevenue, effectiveRate, lineHours, quoteSummary, split } from "../../../lib/calc";
-import { PROJECT_STATUSES, STATUS_LABEL, pct, toInputDate, usd } from "@genclover/ui/format";
+import { KIND_LABEL, PROJECT_KINDS, PROJECT_STATUSES, STATUS_LABEL, pct, toInputDate, usd } from "@genclover/ui/format";
 import { saveAgreement, updateProject } from "../actions";
 
 type P = {
   id: string;
   name: string;
   clientId: string;
+  kind: string;
   status: string;
   engagementModel: string;
   startDate: string | null;
@@ -33,7 +34,7 @@ const VISIBLE: Record<string, string[]> = {
   FIXED: ["agreedMonthly"],
 };
 
-export function ProjectInfoForm({ project, clients, readOnly }: { project: P; clients: { id: string; name: string }[]; readOnly: boolean }) {
+export function ProjectInfoForm({ project, client, readOnly }: { project: P; client: { code: string; name: string }; readOnly: boolean }) {
   const [state, action, pending] = useActionState(updateProject.bind(null, project.id), undefined);
   return (
     <form action={action} className="card space-y-4 p-5">
@@ -50,8 +51,12 @@ export function ProjectInfoForm({ project, clients, readOnly }: { project: P; cl
         </div>
         <div>
           <label className="label">Client</label>
-          <select className="input" name="clientId" defaultValue={project.clientId} disabled={readOnly}>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <input className="input" value={`${client.code} · ${client.name}`} disabled title="Fixed: the project ID belongs to this client" />
+        </div>
+        <div>
+          <label className="label">Type</label>
+          <select className="input" name="kind" defaultValue={project.kind} disabled={readOnly}>
+            {PROJECT_KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
           </select>
         </div>
         <div>

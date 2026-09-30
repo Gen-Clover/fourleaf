@@ -12,16 +12,19 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "npm run dev -w @genclover/portal",
+    "dev": "concurrently -k -n portal,worker -c red,blue \"npm run dev -w @genclover/portal\" \"npm run dev -w @genclover/workers\"",
     "build": "npm run build -w @genclover/portal",
     "start": "npm run start -w @genclover/portal",
     "lint": "eslint apps tools packages",
     "typecheck": "npm run typecheck -w @genclover/portal",
     "db:generate": "npm run generate -w @genclover/db",
-    "db:push": "npm run push -w @genclover/db",
+    "db:push": "npm run push -w @genclover/db && npm run backfill -w @genclover/ids",
     "db:seed": "npm run seed -w @genclover/db",
-    "setup": "npm run setup -w @genclover/db",
-    "db:migrate-sqlite": "npm run migrate:sqlite -w @genclover/db --"
+    "setup": "npm run db:push && npm run db:seed",
+    "db:migrate-sqlite": "npm run migrate:sqlite -w @genclover/db --",
+    "db:local": "npm run local -w @genclover/db",
+    "dev:portal": "npm run dev -w @genclover/portal",
+    "worker": "npm run start -w @genclover/workers"
   },
   "allowScripts": {
     "prisma@6.19.3": true,
@@ -29,5 +32,8 @@
     "@prisma/engines@6.19.3": true,
     "esbuild@0.28.2": true,
     "unrs-resolver@1.12.2": true
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.4"
   }
 }

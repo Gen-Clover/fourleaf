@@ -1,15 +1,13 @@
 import "server-only";
 import { prisma, type Tx } from "@genclover/db";
+import * as ids from "@genclover/ids";
 import { derivedInvoiceStatus, fyShort, fyStartYear, invoiceTotal, monthStatusFor, paidUsd } from "./finance";
 import { getInvoiceSettings } from "./settings";
 
-/** Next consecutive number for the financial year of `issueDate`: GC/26-27/0001 */
+/** Next consecutive number for the financial year of `issueDate`: GCI/26-27/0001 */
 export async function nextInvoiceNumber(tx: Tx, issueDate: Date) {
   const { prefix } = await getInvoiceSettings();
-  const head = `${prefix}/${fyShort(fyStartYear(issueDate))}/`;
-  const last = await tx.invoice.findFirst({ where: { number: { startsWith: head } }, orderBy: { number: "desc" } });
-  const n = last ? Number(last.number.slice(head.length)) + 1 : 1;
-  return `${head}${String(n).padStart(4, "0")}`;
+  return ids.nextInvoiceNumber(tx, prefix, fyShort(fyStartYear(issueDate)));
 }
 
 /** Recompute total + status from lines and payments, then mirror status onto linked monthly records. */

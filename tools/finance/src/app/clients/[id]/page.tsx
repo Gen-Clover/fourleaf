@@ -22,7 +22,12 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
     <>
       <PageHeader
         title={client.name}
-        subtitle={<Link href="/clients" className="hover:underline">← All clients</Link>}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-2">
+            <Link href="/clients" className="hover:underline">← All clients</Link>·
+            <span className="font-mono text-xs">{client.number}</span>·<span className="font-mono text-xs">{client.code}</span>
+          </span>
+        }
         actions={
           <>
             {canEdit && <Link href={`/projects/new?client=${client.id}`} className="btn-primary">+ New project</Link>}

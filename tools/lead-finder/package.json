@@ -1,0 +1,30 @@
+{
+  "name": "@genclover/lead-finder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lead Finder tool: find businesses by niche and area, audit their websites, score and follow up leads",
+  "exports": {
+    "./app/*": "./src/app/*.tsx",
+    "./api/*": "./src/api/*.ts",
+    "./jobs": "./src/jobs.ts",
+    "./nav": "./src/nav.ts"
+  },
+  "dependencies": {
+    "@genclover/auth": "*",
+    "@genclover/db": "*",
+    "@genclover/ids": "*",
+    "@genclover/ui": "*",
+    "imapflow": "^2.1.2",
+    "mailparser": "^3.9.32",
+    "nodemailer": "^10.0.13",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "next": "15.5.26",
+    "react": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.9.0",
+    "@types/nodemailer": "^8.0.2"
+  }
+}

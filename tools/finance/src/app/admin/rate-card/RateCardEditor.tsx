@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { type Bucket, type Params, roleMetrics } from "../../../lib/calc";
-import { num, pct, usd } from "@genclover/ui/format";
+import { num, pct } from "@genclover/ui/format";
 import { saveRateCard } from "../actions";
 
 export type Row = {
@@ -70,7 +70,7 @@ export default function RateCardEditor({ initial, params, buckets }: { initial: 
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="tbl">
+        <table className="tbl [&_td]:px-1.5 [&_th]:px-1.5">
           <thead>
             <tr>
               <th></th>
@@ -80,13 +80,11 @@ export default function RateCardEditor({ initial, params, buckets }: { initial: 
               <th>Mkt Max</th>
               <th>US Salary</th>
               <th>Standard</th>
-              <th>Floor (override)</th>
+              <th title="Leave empty to use the floor rule (shown in grey)">Floor</th>
               <th>CTC Min ₹L</th>
               <th>CTC Max ₹L</th>
               <th>Active</th>
-              <th className="num">Floor</th>
-              <th className="num">Savings</th>
-              <th className="num">Coverage</th>
+              <th className="num" title="Savings vs US loaded cost · coverage of the India CTC midpoint">Savings · Cover</th>
               <th></th>
             </tr>
           </thead>
@@ -99,26 +97,32 @@ export default function RateCardEditor({ initial, params, buckets }: { initial: 
                     <button className="px-1 text-neutral-400 hover:text-ink" onClick={() => move(i, -1)} title="Move up">↑</button>
                     <button className="px-1 text-neutral-400 hover:text-ink" onClick={() => move(i, 1)} title="Move down">↓</button>
                   </td>
-                  <td><input className="input-sm w-64" value={r.name} onChange={(e) => set(i, { name: e.target.value })} /></td>
+                  <td><input className="input-sm w-52" value={r.name} onChange={(e) => set(i, { name: e.target.value })} /></td>
                   <td>
-                    <input className="input-sm w-44" list="families" value={r.family} onChange={(e) => set(i, { family: e.target.value })} />
+                    <input className="input-sm w-36" list="families" value={r.family} onChange={(e) => set(i, { family: e.target.value })} />
                   </td>
                   <td><input className="input-sm w-16" type="number" value={r.marketMin} onChange={(e) => set(i, { marketMin: n(e.target.value) })} /></td>
                   <td><input className="input-sm w-16" type="number" value={r.marketMax} onChange={(e) => set(i, { marketMax: n(e.target.value) })} /></td>
                   <td><input className="input-sm w-24" type="number" step={1000} value={r.usSalary} onChange={(e) => set(i, { usSalary: n(e.target.value) })} /></td>
                   <td><input className="input-sm w-16 font-semibold text-brand-fg" type="number" value={r.standardRate} onChange={(e) => set(i, { standardRate: n(e.target.value) })} /></td>
-                  <td><input className="input-sm w-16" type="number" placeholder="rule" value={r.floorRate ?? ""} onChange={(e) => set(i, { floorRate: nn(e.target.value) })} /></td>
+                  <td><input className="input-sm w-16" type="number" placeholder={String(m.floor)} title="Empty = floor rule" value={r.floorRate ?? ""} onChange={(e) => set(i, { floorRate: nn(e.target.value) })} /></td>
                   <td><input className="input-sm w-16" type="number" value={r.ctcMinL ?? ""} onChange={(e) => set(i, { ctcMinL: nn(e.target.value) })} /></td>
                   <td><input className="input-sm w-16" type="number" value={r.ctcMaxL ?? ""} onChange={(e) => set(i, { ctcMaxL: nn(e.target.value) })} /></td>
                   <td className="text-center"><input type="checkbox" checked={r.active} onChange={(e) => set(i, { active: e.target.checked })} /></td>
-                  <td className="num">{usd(m.floor)}</td>
-                  <td className="num">{pct(m.savings)}</td>
-                  <td className={`num ${m.coverage != null && m.coverage < params.coverageTarget ? "text-amber-700" : ""}`}>
-                    {m.coverage == null ? "—" : `${num(m.coverage, 2)}×`}
+                  <td className="num text-xs leading-tight">
+                    <div>{pct(m.savings)}</div>
+                    <div className={m.coverage != null && m.coverage < params.coverageTarget ? "text-amber-700" : "text-neutral-500"}>
+                      {m.coverage == null ? "—" : `${num(m.coverage, 2)}×`}
+                    </div>
                   </td>
                   <td>
-                    <button className="btn-danger btn-sm" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))} title="Roles used in projects are deactivated instead of deleted">
-                      Remove
+                    <button
+                      className="btn-danger btn-sm"
+                      onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
+                      title="Remove (roles used in projects are deactivated instead of deleted)"
+                      aria-label={`Remove ${r.name}`}
+                    >
+                      ✕
                     </button>
                   </td>
                 </tr>

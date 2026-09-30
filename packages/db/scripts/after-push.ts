@@ -1,8 +1,9 @@
-// Runs after `prisma db push` (npm run push). Two things Prisma can't do on MongoDB:
+// Runs after `prisma db push` (npm run push). Three things Prisma can't do on MongoDB (3: see below):
 //
-// 1. Partial unique index. InvoiceLine.expenseId is optional and must be unique when set (an
-//    expense is billed on at most one line). A plain unique index would allow only one null, so
-//    this index covers only lines that point at an expense. Its own name keeps `db push` away.
+// 1. Partial unique indexes. InvoiceLine.expenseId (an expense is billed on at most one line) and
+//    Lead.placeId (one lead per Google place) are optional and must be unique when set. A plain
+//    unique index would allow only one null, so each index covers only documents that have a
+//    value. Their own names keep `db push` away.
 //
 // 2. SQL-style nulls. The app stores omitted optional fields as explicit nulls (src/sql-nulls.ts)
 //    so `where: { x: null }` behaves like SQL. Documents written before a field existed don't
@@ -12,7 +13,11 @@ import { Prisma, PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 // $type 2 = BSON string (the numeric form; Prisma misreads { $type: "string" } in raw results).
-const PARTIAL_UNIQUE = [{ collection: "InvoiceLine", field: "expenseId", name: "InvoiceLine_expenseId_billed_once" }];
+const PARTIAL_UNIQUE = [
+  { collection: "InvoiceLine", field: "expenseId", name: "InvoiceLine_expenseId_billed_once" },
+  // One lead per Google place; leads added by hand have no place ID.
+  { collection: "Lead", field: "placeId", name: "Lead_placeId_once" },
+];
 
 async function main() {
   for (const { collection, field, name } of PARTIAL_UNIQUE) {
@@ -36,6 +41,26 @@ async function main() {
     filled += res.nModified ?? 0;
   }
   console.log(`Optional fields backfilled with null: ${filled} document update(s)`);
+
+  // 3. Defaults. Prisma fills a missing field's default when reading, but a filter such as
+  //    `{ contactCount: 0 }` can't match a document that lacks the field. Write plain defaults
+  //    (numbers, booleans, strings, empty lists) into documents created before the field existed.
+  let defaulted = 0;
+  for (const m of Prisma.dmmf.datamodel.models) {
+    const withDefault = m.fields.flatMap((f) => {
+      if (f.isId || f.kind === "object") return [];
+      if (f.isList && f.kind === "scalar") return [{ name: f.dbName ?? f.name, value: [] as unknown }];
+      const d = f.default as unknown;
+      return f.hasDefaultValue && (typeof d === "number" || typeof d === "boolean" || typeof d === "string") ? [{ name: f.dbName ?? f.name, value: d }] : [];
+    });
+    if (!withDefault.length) continue;
+    const res = (await prisma.$runCommandRaw({
+      update: m.dbName ?? m.name,
+      updates: withDefault.map((f) => ({ q: { [f.name]: { $exists: false } }, u: { $set: { [f.name]: f.value as Prisma.InputJsonValue } }, multi: true })),
+    })) as { nModified?: number };
+    defaulted += res.nModified ?? 0;
+  }
+  console.log(`Fields backfilled with their defaults: ${defaulted} document update(s)`);
 }
 
 main()
