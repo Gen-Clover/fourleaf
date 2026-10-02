@@ -1,30 +1,32 @@
 import { PageHeader } from "@genclover/ui";
-import { PERMISSIONS, permissionsOf, requirePermission, ROLE_INFO, ROLES, type Permission } from "@genclover/auth";
+import { can, PERMISSIONS, permissionsOf, requirePermission, ROLE_INFO, ROLES, type Permission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { NewUserForm, UsersTable } from "./UsersClient";
 
 /** The permission groups shown in the "What each role can do" table. */
 const GROUPS: [string, Permission[]][] = [
-  ["Lead Finder", ["leads.view", "leads.edit", "leads.won", "leads.settings"]],
+  ["Lead Finder", ["leads.view", "leads.team", "leads.all", "leads.edit", "leads.manage", "leads.won", "leads.settings"]],
+  ["Sales incentives", ["incentives.own", "incentives.propose", "incentives.approve", "incentives.manage"]],
   ["Money in leads", ["deals.own", "deals.all"]],
   ["Prices", ["prices.view"]],
   ["Clients & projects", ["clients.view", "clients.edit", "projects.view", "projects.edit"]],
   ["Hours", ["hours.own", "hours.all"]],
   ["Finance", ["finance.view", "finance.edit", "finance.settings"]],
   ["Costs & salaries", ["cost.view", "cost.edit"]],
-  ["Portal", ["admin"]],
+  ["Portal", ["users.manage", "admin"]],
 ];
 
 export default async function UsersPage() {
-  const me = await requirePermission("admin");
+  const me = await requirePermission("users.manage");
   const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
   const roles = ROLES.map((r) => ({ key: r, ...ROLE_INFO[r] }));
+  const isOwner = can(me.role, "admin");
   return (
     <>
       <PageHeader title="Users & Roles" subtitle="Each person gets one role. The role decides which tools, pages and figures they see." />
       <div className="space-y-6">
-        <NewUserForm roles={roles} />
-        <UsersTable meId={me.id} roles={roles} users={users.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, active: u.active, lastLoginAt: u.lastLoginAt?.toISOString() ?? null }))} />
+        <NewUserForm roles={isOwner ? roles : roles.filter((r) => r.key !== "OWNER")} />
+        <UsersTable meId={me.id} isOwner={isOwner} roles={roles} users={users.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, active: u.active, lastLoginAt: u.lastLoginAt?.toISOString() ?? null }))} />
 
         <section className="card overflow-x-auto">
           <div className="card-h"><div className="card-t">What each role can do</div></div>

@@ -7,9 +7,12 @@ import { isService, SERVICE } from "../../lib/services";
 import AutoRefresh from "../AutoRefresh";
 import { SearchStatus } from "./SearchStatus";
 import Schedules from "./Schedules";
+import GenerateGate from "../../lib/GenerateGate";
+import { canGenerateLeads } from "../../lib/scope";
 
 export default async function SearchesPage() {
   const user = await requireUser();
+  if (!(await canGenerateLeads(user))) return <GenerateGate title="Searches" />;
   const [searches, schedules] = await Promise.all([
     prisma.leadSearch.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
     prisma.leadSchedule.findMany({ orderBy: { createdAt: "asc" } }),

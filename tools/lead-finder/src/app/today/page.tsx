@@ -15,6 +15,7 @@ import { getLfSettings, getLfTexts } from "../../lib/settings";
 import { endOfTodayIst as endOfToday, startOfTodayIst as startOfToday } from "../../lib/time";
 import { Score, StageBadge } from "../bits";
 import MarketToggle from "../MarketToggle";
+import { seesAllLeads } from "../../lib/scope";
 import TodayCard from "./TodayCard";
 
 type Kind = "REPLY" | "FOLLOW_UP" | "NEW";
@@ -32,7 +33,9 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   const endOfTodayIst = endOfToday();
   const startOfTodayIst = startOfToday();
   const texts = await getLfTexts();
-  const scope = { doNotContact: false, branchOfId: null, ...(market ? { market } : {}) };
+  // Today is each person's own queue: the leads they own (owners and the CFO, who see every lead, get everyone's).
+  const mine = seesAllLeads(user) ? {} : { ownerId: user.id };
+  const scope = { ...mine, doNotContact: false, branchOfId: null, ...(market ? { market } : {}) };
   // Automatic email follow-ups (Settings) are sent by the worker, so they don't need a person here.
   const autoEmail = s.autoEmailFollowUps > 0 && emailConfigured();
 
@@ -50,7 +53,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
       orderBy: { nextFollowUpAt: "asc" },
       take: 100,
     }),
-    prisma.lead.count({ where: { firstContactAt: { gte: startOfTodayIst }, ...(market ? { market } : {}) } }),
+    prisma.lead.count({ where: { ...mine, firstContactAt: { gte: startOfTodayIst }, ...(market ? { market } : {}) } }),
     // My calls and meetings today, and any I missed.
     prisma.leadTask.findMany({
       where: { status: "OPEN", assigneeId: user.id, dueAt: { lte: endOfTodayIst } },

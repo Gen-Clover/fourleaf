@@ -120,5 +120,11 @@ export async function nextDecisionCode(db: Db, at = new Date()) {
   return `DEC-${year}-${pad(await nextNumber(db, `decision:${year}`), 3)}`;
 }
 
+/** Sales incentive INC-2026-0001 (year won, IST). */
+export async function nextIncentiveCode(db: Db, at = new Date()) {
+  const { year } = ist(at);
+  return `INC-${year}-${pad(await nextNumber(db, `incentive:${year}`), 4)}`;
+}
+
 /** PR-2026-10 for October 2026 (month = "2026-10"). */
 export const payRunCode = (month: string) => `PR-${month}`;

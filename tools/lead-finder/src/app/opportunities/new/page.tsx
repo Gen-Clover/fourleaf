@@ -3,6 +3,7 @@ import { PageHeader } from "@genclover/ui";
 import { can, requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import OpportunityForm from "../OpportunityForm";
+import { leadScope } from "../../../lib/scope";
 
 /** A new deal for an account (?lead=) or an existing client (?client=). */
 export default async function NewOpportunityPage({ searchParams }: { searchParams: Promise<{ lead?: string; client?: string }> }) {
@@ -12,7 +13,7 @@ export default async function NewOpportunityPage({ searchParams }: { searchParam
     sp.lead ? prisma.lead.findUnique({ where: { id: sp.lead }, select: { id: true, name: true, services: true, market: true, ownerId: true, bestService: true, kind: true } }) : null,
     sp.client ? prisma.client.findUnique({ where: { id: sp.client }, select: { id: true, name: true, currency: true } }) : null,
     prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    sp.lead || sp.client ? [] : prisma.lead.findMany({ where: { kind: "B2B" }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true }, take: 500 }),
+    sp.lead || sp.client ? [] : prisma.lead.findMany({ where: { ...(await leadScope(user)), kind: "B2B" }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true }, take: 500 }),
   ]);
   if (!lead && !client) {
     return (

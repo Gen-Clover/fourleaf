@@ -62,7 +62,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
                     {showPay && (
                       <td className="hidden text-sm lg:table-cell">
                         {PAY_MODELS[p.payModel]?.label ?? p.payModel}
-                        {p.payModel !== "FIXED_FEE" && <div className="text-xs text-neutral-500">{inr((p as { costInr?: number }).costInr ?? 0)}{p.payModel === "HOURLY" ? " / hr" : " / month"}</div>}
+                        {!(["FIXED_FEE", "COMMISSION"] as string[]).includes(p.payModel) && <div className="text-xs text-neutral-500">{inr((p as { costInr?: number }).costInr ?? 0)}{p.payModel === "HOURLY" ? " / hr" : " / month"}</div>}
                       </td>
                     )}
                   </tr>

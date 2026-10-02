@@ -17,6 +17,7 @@
     "@genclover/finance": "*",
     "@genclover/governance": "*",
     "@genclover/ids": "*",
+    "@genclover/incentives": "*",
     "@genclover/lead-finder": "*",
     "@genclover/people": "*",
     "@genclover/ui": "*",

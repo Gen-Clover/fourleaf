@@ -10,13 +10,21 @@ import * as ids from "@genclover/ids";
 import { assertPermission, can } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
 import { type Result, fail, optDate, optStr } from "@genclover/ui/result";
+import * as incentives from "@genclover/incentives";
+import { checkCin, checkEin, checkGstin, normalizeCin, normalizeEin } from "@genclover/incentives/identity";
+import { qualifying } from "@genclover/incentives/rules";
 import { AGREEMENT_STATUSES, AGREEMENT_TYPES, parseChecklist } from "../lib/agreements";
-import { cleanTaxFields } from "../lib/taxProfile";
+import { cleanTaxFields, isIndia } from "../lib/taxProfile";
 
 const email = z.string().trim().transform((s) => (s === "" ? null : s)).pipe(z.email("Invalid email").nullable()).optional();
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const upper = z.string().trim().transform((s) => (s === "" ? null : s.toUpperCase())).nullable().optional();
+/** A registration-number check (identity.ts) as a zod refinement: its message is the error. */
+const check = (fn: (v: string | null | undefined) => string | null) => (v: string | null | undefined, ctx: { addIssue: (issue: { code: "custom"; message: string }) => void }) => {
+  const m = fn(v);
+  if (m) ctx.addIssue({ code: "custom", message: m });
+};
 
 const ClientSchema = z.object({
   name: z.string().trim().min(1, "Client / company name is required"),
@@ -31,8 +39,10 @@ const ClientSchema = z.object({
   website: optStr,
   industry: optStr,
   billingAddress: optStr,
-  gstin: upper.refine((v) => !v || GSTIN_RE.test(v), "GSTIN should look like 03ABCDE1234F1Z5"),
+  gstin: upper.refine((v) => !v || GSTIN_RE.test(v), "GSTIN should look like 03ABCDE1234F1Z5").superRefine(check(checkGstin)),
   pan: upper.refine((v) => !v || PAN_RE.test(v), "PAN should look like ABCDE1234F"),
+  cin: upper.transform((v) => normalizeCin(v)).superRefine(check(checkCin)),
+  ein: optStr.transform((v) => (v ? normalizeEin(v) : null)).superRefine(check(checkEin)),
   currency: z.enum(["INR", "USD"]).default("USD"),
   paymentTermsDays: z.string().trim().transform((s) => (s === "" ? null : Math.round(Number(s)))).pipe(z.number().min(0).max(180).nullable()).optional(),
   accountManager: optStr,
@@ -49,14 +59,37 @@ const touchClient = (id?: string) => {
   if (id) revalidatePath(`/clients/${id}`);
 };
 
-async function createClientRecord(user: { id: string; name: string }, data: z.infer<typeof NewClientSchema>, status: "ONBOARDING" | "ACTIVE") {
+/** Registration numbers belong to one country: CIN in India, EIN in the USA. */
+function cleanIdentity<T extends { country?: string | null; cin?: string | null; ein?: string | null }>(d: T): T {
+  return isIndia(d.country) ? { ...d, ein: null } : { ...d, cin: null };
+}
+
+/**
+ * The same business can't become a second client: a matching GSTIN / PAN / CIN / EIN stops it (use "existing
+ * client" instead). A matching website, phone or name only warns, unless the person confirmed it's different.
+ */
+async function guardDuplicate(data: { name: string; gstin?: string | null; pan?: string | null; cin?: string | null; ein?: string | null; website?: string | null; phone?: string | null }, confirmedDifferent: boolean) {
+  const matches = await incentives.identityMatches(data);
+  const hard = matches.filter((m) => m.hard);
+  if (hard.length) throw new Error(`This business is already a client: ${hard.map((m) => `${m.number} ${m.name} (same ${m.on.filter((o) => ["GSTIN", "PAN", "CIN", "EIN"].includes(o)).join(", ")})`).join("; ")}. Onboard it as an existing client.`);
+  if (matches.length && !confirmedDifferent) {
+    throw new Error(`Looks like an existing client: ${matches.map((m) => `${m.number} ${m.name} (same ${m.on.join(", ")})`).join("; ")}. If it's a different business, tick “Checked: different business” and create it again.`);
+  }
+  return matches;
+}
+
+async function createClientRecord(user: { id: string; name: string }, data: z.infer<typeof NewClientSchema>, status: "ONBOARDING" | "ACTIVE", o: { confirmedDifferent?: boolean; verified?: boolean } = {}) {
   const taken = await prisma.client.findUnique({ where: { code: data.code }, select: { name: true } });
   if (taken) throw new Error(`Client code ${data.code} is already used by ${taken.name}`);
+  const soft = await guardDuplicate(data, !!o.confirmedDifferent);
   const number = await ids.nextClientNumber(prisma);
-  const c = await prisma.client.create({ data: { ...data, number, status, onboardedAt: status === "ACTIVE" ? new Date() : null } });
-  await audit(user, "CREATE", "Client", c.id, `Created client ${number} (${data.code}) ${data.name}`);
+  const verified = o.verified && (data.gstin || data.cin || data.ein) ? { identityVerifiedBy: user.name, identityVerifiedAt: new Date() } : {};
+  const c = await prisma.client.create({ data: { ...data, ...verified, number, status, onboardedAt: status === "ACTIVE" ? new Date() : null } });
+  await audit(user, "CREATE", "Client", c.id, `Created client ${number} (${data.code}) ${data.name}${soft.length ? `; confirmed different from ${soft.map((m) => m.number).join(", ")}` : ""}`);
   return c;
 }
+
+const IDENTITY_FIELDS = ["gstin", "pan", "cin", "ein"] as const;
 
 export async function saveClient(_: Result, fd: FormData): Promise<Result> {
   const id = String(fd.get("id") ?? "");
@@ -64,11 +97,24 @@ export async function saveClient(_: Result, fd: FormData): Promise<Result> {
   try {
     const user = await assertPermission("clients.edit");
     if (id) {
-      const data = cleanTaxFields(ClientSchema.parse(Object.fromEntries(fd)));
-      await prisma.client.update({ where: { id }, data });
-      await audit(user, "UPDATE", "Client", id, `Updated client ${data.name}`);
+      const data = cleanIdentity(cleanTaxFields(ClientSchema.parse(Object.fromEntries(fd))));
+      const prev = await prisma.client.findUniqueOrThrow({ where: { id } });
+      // Registration numbers decide whether a client is "new" (sales incentives): once the client is active, only an
+      // owner changes them, and the change is audited.
+      const changed = IDENTITY_FIELDS.filter((k) => (prev[k] ?? null) !== (data[k] ?? null));
+      if (changed.length) {
+        if (prev.status !== "ONBOARDING" && !can(user.role, "incentives.manage")) throw new Error(`Only an owner can change ${changed.map((k) => k.toUpperCase()).join(", ")} once the client is active`);
+        const others = (await incentives.identityMatches({ ...data, website: null, phone: null, name: null }, id)).filter((m) => m.hard);
+        if (others.length) throw new Error(`That number belongs to ${others.map((m) => `${m.number} ${m.name}`).join(", ")}`);
+      }
+      await prisma.client.update({ where: { id }, data: changed.length ? { ...data, identityVerifiedBy: null, identityVerifiedAt: null } : data });
+      await audit(user, "UPDATE", "Client", id, `Updated client ${data.name}${changed.length ? `; identity changed: ${changed.map((k) => `${k.toUpperCase()} ${prev[k] ?? "—"} → ${data[k] ?? "—"}`).join(", ")}` : ""}`);
+      if (changed.length) {
+        const fmtIds = (x: Record<string, unknown>) => changed.map((k) => `${k.toUpperCase()} ${x[k] ?? "—"}`).join(", ");
+        await incentives.clientIdentityChanged(id, user, fmtIds(prev), fmtIds(data), can(user.role, "incentives.manage"));
+      }
     } else {
-      clientId = (await createClientRecord(user, cleanTaxFields(NewClientSchema.parse(Object.fromEntries(fd))), "ACTIVE")).id;
+      clientId = (await createClientRecord(user, cleanIdentity(cleanTaxFields(NewClientSchema.parse(Object.fromEntries(fd)))), "ACTIVE", { confirmedDifferent: fd.get("confirmedDifferent") === "on" })).id;
     }
     touchClient(clientId);
   } catch (e) {
@@ -160,15 +206,25 @@ export async function deleteContact(contactId: string): Promise<Result> {
 
 const OnboardSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("existing"), clientId: z.string().min(1, "Pick the client") }),
-  z.object({ mode: z.literal("new"), client: NewClientSchema }),
+  z.object({ mode: z.literal("new"), client: NewClientSchema, confirmedDifferent: z.boolean().default(false), verified: z.boolean().default(false) }),
 ]);
+
+/** The sales incentive decision, required for every won deal onboarded (so it can't be forgotten). */
+const IncentiveDecision = z.object({
+  applies: z.boolean(),
+  services: z.array(z.object({ key: z.string().min(1), label: z.string().trim().min(1, "Every service needs a name").max(120), kind: z.enum(["ONE_TIME", "MONTHLY"]), value: z.number().min(0).nullable() })).min(1, "List at least one service that was sold"),
+  pickedKey: z.string().nullable(),
+  note: z.string().trim().max(500).optional(),
+});
 
 /**
  * A won opportunity (or a won lead from before opportunities) becomes a client: a new Client ID and code, or an
  * existing client (another project for them). The lead and opportunity are linked, so reports can trace the client
  * back to the lead that found it.
  */
-export async function onboardDeal(input: { opportunityId?: string; leadId?: string } & z.input<typeof OnboardSchema>): Promise<Result & { clientId?: string }> {
+export async function onboardDeal(
+  input: { opportunityId?: string; leadId?: string; incentive?: z.input<typeof IncentiveDecision> } & z.input<typeof OnboardSchema>,
+): Promise<Result & { clientId?: string }> {
   try {
     const user = await assertPermission("clients.edit");
     const d = OnboardSchema.parse(input);
@@ -176,8 +232,24 @@ export async function onboardDeal(input: { opportunityId?: string; leadId?: stri
     const leadId = opp?.leadId ?? input.leadId ?? null;
     if (opp && opp.stage !== "WON") throw new Error("Only won opportunities can be onboarded");
     if (opp?.onboardedAt) throw new Error("This deal has already been onboarded");
+    // The incentive decision is checked before anything is created, so a mistake doesn't leave half a client.
+    const canApprove = can(user.role, "incentives.approve") || can(user.role, "incentives.manage");
+    const decision = IncentiveDecision.parse(input.incentive ?? (() => { throw new Error("Decide the sales incentive for this deal (it can't be skipped)"); })());
+    if (!can(user.role, "incentives.propose") && !canApprove) throw new Error("Your role can't record the sales incentive: ask an owner or the CFO to onboard this deal");
+    if (!decision.applies && !decision.note) throw new Error("Say why there's no sales incentive on this deal");
+    const amounts = can(user.role, "deals.all") || canApprove;
+    if (decision.applies && canApprove && !qualifying(decision.services, decision.pickedKey, !decision.pickedKey)?.value) {
+      throw new Error("Enter the agreed price (excluding GST) of the qualifying service");
+    }
+    if (decision.applies) {
+      const existing = opp ? await prisma.salesIncentive.findFirst({ where: { opportunityId: opp.id }, select: { sellerUserId: true } }) : null;
+      const seller = existing ? existing.sellerUserId : (opp?.ownerId ?? (leadId ? (await prisma.lead.findUnique({ where: { id: leadId }, select: { ownerId: true } }))?.ownerId : null));
+      if (!seller) throw new Error("Nobody owns this deal, so there's no seller to credit: choose no incentive (with the reason), or ask an owner to set the seller first");
+    }
     const client =
-      d.mode === "existing" ? await prisma.client.findUniqueOrThrow({ where: { id: d.clientId } }) : await createClientRecord(user, cleanTaxFields(d.client), "ONBOARDING");
+      d.mode === "existing"
+        ? await prisma.client.findUniqueOrThrow({ where: { id: d.clientId } })
+        : await createClientRecord(user, cleanIdentity(cleanTaxFields(d.client)), "ONBOARDING", { confirmedDifferent: d.confirmedDifferent, verified: d.verified });
     const now = new Date();
     let oppId = opp?.id;
     if (opp) await prisma.opportunity.update({ where: { id: opp.id }, data: { clientId: client.id, onboardedAt: now } });
@@ -205,10 +277,19 @@ export async function onboardDeal(input: { opportunityId?: string; leadId?: stri
       ).id;
     }
     if (leadId) await prisma.lead.update({ where: { id: leadId }, data: { clientId: client.id } });
+    // The sales incentive: decided here by an approver, or proposed for one.
+    let incNote = "";
+    if (oppId) {
+      const inc = await incentives.ensureForOpportunity(oppId, user);
+      const saved = await incentives.decideAtOnboarding(inc.id, decision, { by: user, canApprove, canSeeAmounts: amounts, clientId: client.id });
+      incNote = saved.status === "APPROVED" ? ` Incentive ${saved.code} approved.` : saved.status === "NOT_ELIGIBLE" ? ` No incentive (${saved.code}).` : ` Incentive ${saved.code} sent for approval.`;
+      if (saved.newClient === false) incNote += " Note: this business isn't a new client, so the owner will review it.";
+      revalidatePath("/leads/incentives");
+    }
     await audit(user, "UPDATE", "Client", client.id, `Onboarded ${client.number} ${client.name}${oppId ? ` from deal ${opp?.code ?? ""}` : ""}`);
     touchClient(client.id);
     revalidatePath("/leads/won");
-    return { ok: true, message: `${client.number} · ${client.code} ready. Next: agreements and the project.`, clientId: client.id };
+    return { ok: true, message: `${client.number} · ${client.code} ready. Next: agreements and the project.${incNote}`, clientId: client.id };
   } catch (e) {
     return fail(e);
   }

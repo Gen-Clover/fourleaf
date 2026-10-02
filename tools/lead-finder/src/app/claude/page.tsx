@@ -8,6 +8,7 @@ import { isMarket, MARKETS, MARKET_KEYS } from "../../lib/markets";
 import { isService, SERVICE } from "../../lib/services";
 import { ClaudePanel } from "../ClaudePanel";
 import MarketToggle from "../MarketToggle";
+import { leadScope } from "../../lib/scope";
 
 const SIZES = [10, 20, 40];
 
@@ -16,19 +17,20 @@ const SIZES = [10, 20, 40];
  * been reviewed go into one brief; Claude's answer is pasted back and saved to each lead.
  */
 export default async function ClaudeReviewPage({ searchParams }: { searchParams: Promise<{ market?: string; n?: string }> }) {
-  await requirePermission("leads.edit");
+  const user = await requirePermission("leads.edit");
+  const scope = await leadScope(user);
   const sp = await searchParams;
   const market = isMarket(sp.market) ? sp.market : undefined;
   const n = SIZES.includes(Number(sp.n)) ? Number(sp.n) : 20;
   const [next, reviewed] = await Promise.all([
     prisma.lead.findMany({
-      where: { claudeAt: null, stage: { in: ["NEW", "QUALIFIED"] }, doNotContact: false, branchOfId: null, bestScore: { gt: 0 }, ...(market ? { market } : {}) },
+      where: { ...scope, claudeAt: null, stage: { in: ["NEW", "QUALIFIED"] }, doNotContact: false, branchOfId: null, bestScore: { gt: 0 }, ...(market ? { market } : {}) },
       orderBy: [{ bestScore: "desc" }, { reviewCount: "desc" }],
       take: n,
       select: { id: true, code: true, name: true, bestScore: true },
     }),
     prisma.lead.findMany({
-      where: { claudeAt: { not: null }, ...(market ? { market } : {}) },
+      where: { ...scope, claudeAt: { not: null }, ...(market ? { market } : {}) },
       orderBy: { claudeAt: "desc" },
       take: 15,
       select: { id: true, name: true, claudeFit: true, claudeService: true, claudeAt: true },

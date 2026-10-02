@@ -7,6 +7,7 @@ import { assertPermission } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
 import { type Result, fail } from "@genclover/ui/result";
 import { getBuckets } from "../../../lib/settings";
+import { heldByPayment } from "@genclover/incentives";
 import { activePolicyName, allocationFor } from "../../../lib/treasury";
 
 type Alloc = { key: string; percent: number };
@@ -49,8 +50,10 @@ export async function reapplyAllocation(): Promise<Result> {
       where: { fundEntries: { some: { type: "ALLOCATION" } } },
       include: { invoice: { select: { number: true, total: true, taxAmount: true, lines: { select: { kind: true, amount: true } } } } },
     });
+    // Sales incentives earned on a receipt stay held: they are owed whatever the policy.
+    const held = await heldByPayment(payments.map((p) => p.id));
     for (const pay of payments) {
-      const alloc = await allocationFor(pay.inrReceived, pay.invoice);
+      const alloc = await allocationFor(pay.inrReceived, pay.invoice, held.get(pay.id) ?? 0);
       await prisma.$transaction([
         prisma.fundEntry.deleteMany({ where: { paymentId: pay.id, type: "ALLOCATION" } }),
         prisma.fundEntry.createMany({

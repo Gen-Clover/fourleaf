@@ -7,6 +7,7 @@ import { OUTREACH_TYPES } from "../../lib/outreach";
 import { isService, SERVICE, STAGE_LABEL, STEP_LABEL } from "../../lib/services";
 import { getLfSettings } from "../../lib/settings";
 import MarketToggle from "../MarketToggle";
+import { leadScope } from "../../lib/scope";
 
 const PERIODS: [string, string][] = [["30", "30 days"], ["90", "90 days"], ["365", "12 months"], ["0", "All time"]];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -68,32 +69,36 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const days = PERIODS.some(([d]) => d === sp.days) ? Number(sp.days) : 90;
   const since = days ? new Date(Date.now() - days * 86_400_000) : new Date(0);
   const s = await getLfSettings();
+  // Reports cover the leads this person may see: their own, their team's, or everyone's for owners.
+  const sc = await leadScope(user);
+  const lf = { ...sc, ...(market ? { market } : {}) };
+  const rel = Object.keys(lf).length ? { lead: lf } : {};
 
   const [leads, niches, activities, emails, usage, changes, wonLeads, closed, wonDeals] = await Promise.all([
     prisma.lead.findMany({
-      where: { OR: [{ createdAt: { gte: since } }, { firstContactAt: { gte: since } }], ...(market ? { market } : {}) },
+      where: { OR: [{ createdAt: { gte: since } }, { firstContactAt: { gte: since } }], ...lf },
       select: { id: true, nicheKey: true, createdAt: true, firstContactAt: true, repliedAt: true, stage: true, firstService: true, contactCount: true },
     }),
     prisma.leadNiche.findMany({ select: { key: true, label: true } }),
     prisma.leadActivity.findMany({
-      where: { at: { gte: since }, OR: [{ type: { in: OUTREACH_TYPES } }, { type: "REPLY" }], ...(market ? { lead: { market } } : {}) },
+      where: { at: { gte: since }, OR: [{ type: { in: OUTREACH_TYPES } }, { type: "REPLY" }], ...rel },
       select: { leadId: true, type: true, step: true, at: true },
       orderBy: { at: "asc" },
     }),
-    prisma.emailMessage.findMany({ where: { sentAt: { gte: since }, ...(market ? { lead: { market } } : {}) }, select: { status: true, auto: true } }),
+    prisma.emailMessage.findMany({ where: { sentAt: { gte: since }, ...rel }, select: { status: true, auto: true } }),
     prisma.apiUsage.findMany(),
     // Stage history: which stages leads reached in the period, and how long from the first message.
     prisma.leadStageChange.findMany({
-      where: { at: { gte: since }, to: { in: REACH }, ...(market ? { lead: { market } } : {}) },
+      where: { at: { gte: since }, to: { in: REACH }, ...rel },
       select: { leadId: true, to: true, at: true, lead: { select: { firstContactAt: true } } },
     }),
     prisma.lead.findMany({
-      where: { stage: "WON", wonAt: { not: null, gte: since }, ...(market ? { market } : {}) },
+      where: { stage: "WON", wonAt: { not: null, gte: since }, ...lf },
       // Deal values only for owners.
       select: { wonAt: true, firstContactAt: true, wonReason: true, wonPackage: true },
     }),
     prisma.lead.findMany({
-      where: { stage: { in: ["LOST", "NOT_A_FIT"] }, stageChangedAt: { not: null, gte: since }, ...(market ? { market } : {}) },
+      where: { stage: { in: ["LOST", "NOT_A_FIT"] }, stageChangedAt: { not: null, gte: since }, ...lf },
       select: { stage: true, lostReason: true, notFitReason: true },
     }),
     // Won value comes from the deals won in the period. Company totals: owners and the CFO only, not queried otherwise.

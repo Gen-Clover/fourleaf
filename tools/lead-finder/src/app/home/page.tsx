@@ -12,6 +12,7 @@ import { endOfTodayIst, startOfMonthIst } from "../../lib/time";
 import { Score, StageBadge } from "../bits";
 import { SearchStatus } from "../searches/SearchStatus";
 import WorkerStatus from "./WorkerStatus";
+import { leadRelationScope, leadScope } from "../../lib/scope";
 
 /** A dashboard tile that opens the Leads page with its filter applied. */
 const Tile = ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -27,30 +28,32 @@ export default async function LeadFinderHome() {
   const s = await getLfSettings();
   const endOfToday = endOfTodayIst();
   const monthStart = startOfMonthIst();
-  const open = { stage: { in: [...OPEN_STAGES] }, doNotContact: false, branchOfId: null };
+  // Everyone's dashboard counts only the leads they may see: their own, their team's, or all for owners.
+  const sc = await leadScope(user);
+  const open = { ...sc, stage: { in: [...OPEN_STAGES] }, doNotContact: false, branchOfId: null };
 
   // Tile counts use the same rules as the Leads page filters they link to (open = being worked, not
   // do-not-contact, main branch only), so the tile and the list always show the same number.
   const isOwner = can(user.role, "deals.all");
   const weekAhead = new Date(endOfToday.getTime() + 7 * 86_400_000);
   const [byStage, hotCount, due, hotNew, searches, wonThisMonth, niches, byNiche, openCount, dueCount, wonTotal, wonWaiting, stuckCount, snoozedCount, upcoming, deals] = await Promise.all([
-    prisma.lead.groupBy({ by: ["stage"], _count: { _all: true } }),
+    prisma.lead.groupBy({ by: ["stage"], where: sc, _count: { _all: true } }),
     prisma.lead.count({ where: { ...open, bestScore: { gte: s.hotScore } } }),
     prisma.lead.findMany({ where: { ...open, nextFollowUpAt: { not: null, lte: endOfToday } }, omit: NO_DEAL, orderBy: { nextFollowUpAt: "asc" }, take: 10 }),
-    prisma.lead.findMany({ where: { stage: { in: ["NEW", "QUALIFIED"] }, doNotContact: false, branchOfId: null, bestScore: { gte: s.hotScore } }, omit: NO_DEAL, orderBy: [{ bestScore: "desc" }, { reviewCount: "desc" }], take: 10 }),
+    prisma.lead.findMany({ where: { ...sc, stage: { in: ["NEW", "QUALIFIED"] }, doNotContact: false, branchOfId: null, bestScore: { gte: s.hotScore } }, omit: NO_DEAL, orderBy: [{ bestScore: "desc" }, { reviewCount: "desc" }], take: 10 }),
     prisma.leadSearch.findMany({ orderBy: { createdAt: "desc" }, take: 5 }),
-    prisma.lead.count({ where: { stage: "WON", wonAt: { not: null, gte: monthStart } } }),
+    prisma.lead.count({ where: { ...sc, stage: "WON", wonAt: { not: null, gte: monthStart } } }),
     prisma.leadNiche.findMany({ select: { key: true, label: true } }),
-    prisma.lead.groupBy({ by: ["nicheKey", "stage"], _count: { _all: true } }),
+    prisma.lead.groupBy({ by: ["nicheKey", "stage"], where: sc, _count: { _all: true } }),
     prisma.lead.count({ where: open }),
     prisma.lead.count({ where: { ...open, nextFollowUpAt: { not: null, lte: endOfToday } } }),
-    prisma.lead.count({ where: { stage: "WON", branchOfId: null } }),
-    prisma.lead.count({ where: { stage: "WON", clientId: null } }),
-    prisma.lead.count({ where: { AND: [stuckWhere(s), { branchOfId: null }] } }),
-    prisma.lead.count({ where: { stage: "SNOOZED" } }),
+    prisma.lead.count({ where: { ...sc, stage: "WON", branchOfId: null } }),
+    prisma.lead.count({ where: { ...sc, stage: "WON", clientId: null } }),
+    prisma.lead.count({ where: { AND: [sc, stuckWhere(s), { branchOfId: null }] } }),
+    prisma.lead.count({ where: { ...sc, stage: "SNOOZED" } }),
     // The team's calls and meetings: anything missed, and the next 7 days.
     prisma.leadTask.findMany({
-      where: { status: "OPEN", dueAt: { lte: weekAhead } },
+      where: { status: "OPEN", dueAt: { lte: weekAhead }, ...(await leadRelationScope(user)) },
       orderBy: { dueAt: "asc" },
       take: 8,
       include: { lead: { select: { id: true, name: true } } },

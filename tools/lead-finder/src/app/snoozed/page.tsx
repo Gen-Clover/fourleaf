@@ -5,12 +5,13 @@ import { prisma } from "@genclover/db";
 import { date } from "@genclover/ui/format";
 import { REPLY_CATEGORIES, STAGE_LABEL } from "../../lib/services";
 import { WakeButton } from "../tasks/TaskActions";
+import { leadScope } from "../../lib/scope";
 
 /** Leads that said "not now": out of every queue until their date, then back in Today automatically. */
 export default async function SnoozedPage() {
   const user = await requireUser();
   const leads = await prisma.lead.findMany({
-    where: { stage: "SNOOZED" },
+    where: { AND: [await leadScope(user), { stage: "SNOOZED" }] },
     orderBy: { snoozeUntil: "asc" },
     take: 500,
     select: { id: true, name: true, code: true, area: true, snoozeUntil: true, snoozedFromStage: true, replyCategory: true, ownerName: true, stageChangedAt: true },

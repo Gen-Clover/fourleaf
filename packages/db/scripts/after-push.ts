@@ -88,10 +88,10 @@ async function main() {
   } as unknown as Prisma.InputJsonObject)) as { nModified?: number };
   console.log(`Lead stage dates backfilled: ${staged.nModified ?? 0} document update(s)`);
 
-  // 5. Roles. Accounts from before the named roles (packages/auth/src/access.ts): ADMIN became Owner,
-  //    EDITOR Sales and VIEWER Team member. Review them on Users & Roles afterwards.
+  // 5. Roles. Accounts from before the named roles (packages/auth/src/access.ts): EDITOR became Sales and VIEWER
+  //    Team member. (ADMIN is a role of its own now: users and roles only, so it is NOT renamed to Owner.)
   const renamed = await Promise.all(
-    Object.entries({ ADMIN: "OWNER", EDITOR: "SALES", VIEWER: "TEAM" }).map(([from, to]) => prisma.user.updateMany({ where: { role: from }, data: { role: to } })),
+    Object.entries({ EDITOR: "SALES", VIEWER: "TEAM" }).map(([from, to]) => prisma.user.updateMany({ where: { role: from }, data: { role: to } })),
   );
   console.log(`User roles renamed: ${renamed.reduce((n, r) => n + r.count, 0)}`);
 }

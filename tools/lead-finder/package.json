@@ -14,6 +14,7 @@
     "@genclover/auth": "*",
     "@genclover/db": "*",
     "@genclover/ids": "*",
+    "@genclover/incentives": "*",
     "@genclover/ui": "*",
     "imapflow": "^2.1.2",
     "mailparser": "^3.9.32",

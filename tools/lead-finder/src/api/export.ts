@@ -4,6 +4,7 @@ import { prisma } from "@genclover/db";
 import { listWhere, orderBy, parseFilters, scoreField } from "../lib/query";
 import { SERVICE, isService, STAGE_LABEL } from "../lib/services";
 import { getLfSettings } from "../lib/settings";
+import { leadScope } from "../lib/scope";
 
 const cell = (v: unknown) => {
   const s = v == null ? "" : v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
   if (!user || !can(user.role, "leads.edit")) return new NextResponse("Forbidden", { status: 403 });
   const f = parseFilters(Object.fromEntries(req.nextUrl.searchParams), user.id);
   const s = await getLfSettings();
-  const leads = await prisma.lead.findMany({ where: listWhere(f, s), orderBy: orderBy(f), take: 5000 });
+  const leads = await prisma.lead.findMany({ where: { AND: [await leadScope(user), listWhere(f, s)] }, orderBy: orderBy(f), take: 5000 });
   const field = scoreField(f);
   const head = ["Lead ID", "Business", "Niche", "Area", "Stage", "Do not contact", "Score", "Best service", "Phone", "Email", "Website", "Rating", "Reviews", "Next follow-up", "Added"];
   const rows = leads.map((l) => [

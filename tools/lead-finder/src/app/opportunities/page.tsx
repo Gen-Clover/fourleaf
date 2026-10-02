@@ -5,6 +5,7 @@ import { prisma } from "@genclover/db";
 import { date, money } from "@genclover/ui/format";
 import { B2B_SERVICES, OPEN_OPP_STAGES, OPP_MODELS, OPP_STAGES, serviceLabel } from "../../lib/b2b";
 import { visibleDealValues } from "../../lib/dealAccess";
+import { opportunityScope } from "../../lib/scope";
 
 const VIEWS: [string, string][] = [["open", "Open"], ["WON", "Won"], ["LOST", "Lost"], ["ON_HOLD", "On hold"], ["all", "All"]];
 
@@ -19,6 +20,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
   const all = can(user.role, "deals.all");
   const opps = await prisma.opportunity.findMany({
     where: {
+      ...(await opportunityScope(user)),
       ...(view === "open" ? { stage: { in: OPEN_OPP_STAGES } } : view === "all" ? {} : { stage: view }),
       ...(sp.owner === "me" ? { ownerId: user.id } : {}),
       ...(sp.service && B2B_SERVICES[sp.service] ? { services: { has: sp.service } } : {}),

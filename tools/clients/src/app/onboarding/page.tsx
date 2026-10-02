@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Empty, PageHeader, StatusBadge } from "@genclover/ui";
-import { requirePermission } from "@genclover/auth";
+import { can, requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { date } from "@genclover/ui/format";
+import { forOpportunities } from "@genclover/incentives";
+import { parseServices } from "@genclover/incentives/rules";
 import { ONBOARDING_CHECKLIST, parseChecklist } from "../../lib/agreements";
 import { companyState } from "../../lib/company";
-import OnboardForm from "./OnboardForm";
+import OnboardForm, { type IncentiveDraft } from "./OnboardForm";
 
 const countryOf = (market: string | null | undefined) => (market === "US" ? "USA" : "India");
 
@@ -14,7 +16,11 @@ const countryOf = (market: string | null | undefined) => (market === "US" ? "USA
  * Step 2: clients still onboarding, with their checklist progress. No amounts on this page.
  */
 export default async function OnboardingPage() {
-  await requirePermission("clients.edit");
+  const user = await requirePermission("clients.edit");
+  const canApprove = can(user.role, "incentives.approve") || can(user.role, "incentives.manage");
+  const canPropose = canApprove || can(user.role, "incentives.propose");
+  // Amounts only for those allowed to see deal values (this page has none otherwise).
+  const amounts = canApprove || can(user.role, "deals.all");
   const ourState = await companyState();
   const [opportunities, oldWonLeads, clients, onboarding] = await Promise.all([
     prisma.opportunity.findMany({
@@ -40,6 +46,20 @@ export default async function OnboardingPage() {
     prisma.client.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, code: true, number: true } }),
     prisma.client.findMany({ where: { status: "ONBOARDING" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, number: true, code: true, checklist: true, createdAt: true } }),
   ]);
+  const incs = await forOpportunities(opportunities.map((o) => o.id));
+  const incentiveFor = (o: (typeof opportunities)[number]): IncentiveDraft => {
+    const r = incs.get(o.id);
+    const services = r ? parseServices(r.services) : [{ key: "DEAL", label: o.title, kind: "ONE_TIME" as const, value: null }];
+    return {
+      code: r?.code ?? null,
+      seller: r ? r.sellerName : o.ownerName,
+      manager: r && r.managerUserId !== r.sellerUserId ? r.managerName : null,
+      rates: r ? `${r.sellerRatePct}% + ${r.managerRatePct}%` : null,
+      services: amounts ? services : services.map((s) => ({ ...s, value: null })),
+      picked: r && !r.autoSelected ? r.qualifyingKey : null,
+      currency: r?.currency ?? "INR",
+    };
+  };
   const clientOptions = clients.map((c) => ({ id: c.id, label: `${c.code} · ${c.name} (${c.number})` }));
   const takenCodes = clients.map((c) => c.code);
   const waiting = opportunities.length + oldWonLeads.length;
@@ -84,6 +104,8 @@ export default async function OnboardingPage() {
                   }}
                   clients={clientOptions}
                   takenCodes={takenCodes}
+                  incentive={incentiveFor(o)}
+                  access={{ canApprove, canPropose, amounts }}
                 />
               </li>
             ))}
@@ -102,6 +124,19 @@ export default async function OnboardingPage() {
                   deal={{ leadId: l.id, name: l.name, contactName: l.contactName ?? l.personName, email: l.email, phone: l.phone, website: l.website, country: countryOf(l.market), industry: l.industry }}
                   clients={clientOptions}
                   takenCodes={takenCodes}
+                  incentive={{
+                    code: null,
+                    seller: l.ownerName,
+                    manager: null,
+                    rates: null,
+                    services: [
+                      { key: "PACKAGE", label: `Website: ${l.wonPackage ?? "package"}`, kind: "ONE_TIME", value: null },
+                      ...(l.wonCarePlan && l.wonCarePlan !== "None" ? [{ key: "CARE", label: l.wonCarePlan, kind: "MONTHLY" as const, value: null }] : []),
+                    ],
+                    picked: null,
+                    currency: l.market === "US" ? "USD" : "INR",
+                  }}
+                  access={{ canApprove, canPropose, amounts }}
                 />
               </li>
             ))}

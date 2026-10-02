@@ -7,22 +7,27 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@genclover/db";
 import * as ids from "@genclover/ids";
-import { assertPermission } from "@genclover/auth";
+import { assertPermission, can } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
+import { recordAtWon } from "@genclover/incentives";
 import { type Result, fail, optDate, optStr } from "@genclover/ui/result";
 import { B2B_SERVICES, hostOf, IMPORT_SOURCES, INDUSTRIES, matchServices, OPP_MODELS, OPP_STAGES } from "../lib/b2b";
 import { canSeeDeal } from "../lib/dealAccess";
 import { isMarket } from "../lib/markets";
 import { SOURCES } from "../lib/services";
 import { changeStage } from "../lib/stages";
+import { assertNotDuplicate } from "../lib/duplicates";
+import { assertCanGenerate, assertLeadAccess } from "../lib/scope";
 
 const email = z.string().trim().transform((s) => (s === "" ? null : s.toLowerCase())).pipe(z.email("Invalid email").nullable()).optional();
 const url = optStr.refine((v) => !v || /^https?:\/\/\S+$/i.test(v), "Links must start with https://");
 const serviceList = z.array(z.string().refine((s) => s in B2B_SERVICES, "Unknown service")).max(16).default([]);
 const normalizeUrl = (u: string | null | undefined) => (u ? (/^https?:\/\//i.test(u) ? u : `https://${u}`) : null);
 
-async function editor() {
+/** Someone working leads; with a lead id, only one they may see (lib/scope.ts). */
+async function editor(leadId?: string | null) {
   const user = await assertPermission("leads.edit");
+  if (leadId) await assertLeadAccess(user, leadId);
   return { user, by: { id: user.id, name: user.name } };
 }
 
@@ -52,12 +57,8 @@ export async function addAccount(input: z.input<typeof AccountSchema>): Promise<
   try {
     const { user, by } = await editor();
     const d = AccountSchema.parse(input);
-    const host = hostOf(d.website);
-    const dup = await prisma.lead.findFirst({
-      where: { OR: [{ name: { equals: d.name, mode: "insensitive" } }, ...(host ? [{ website: { contains: host, mode: "insensitive" as const } }] : [])] },
-      select: { id: true, code: true, name: true },
-    });
-    if (dup) throw new Error(`Already in the Lead Finder: ${dup.code} ${dup.name}. Open it and add a contact or opportunity there.`);
+    // Checked against every lead and client in the company, then it is the adder's own account.
+    await assertNotDuplicate({ name: d.name, website: d.website, phone: d.contactPhone, email: d.contactEmail, area: d.area, linkedinUrl: d.linkedinUrl });
     const code = await ids.nextLeadId(prisma);
     const lead = await prisma.lead.create({
       data: {
@@ -83,6 +84,10 @@ export async function addAccount(input: z.input<typeof AccountSchema>): Promise<
         stageChangedAt: new Date(),
         ownerId: user.id,
         ownerName: user.name,
+        assignedAt: new Date(),
+        assignedVia: "SELF",
+        createdById: user.id,
+        createdByName: user.name,
         contacts: d.contactName
           ? { create: { name: d.contactName, title: d.contactTitle, email: d.contactEmail, phone: d.contactPhone, linkedinUrl: d.contactLinkedin, isPrimary: true } }
           : undefined,
@@ -109,7 +114,7 @@ const AccountInfo = z.object({
 
 export async function saveAccountInfo(id: string, input: z.input<typeof AccountInfo>): Promise<Result> {
   try {
-    const { user } = await editor();
+    const { user } = await editor(id);
     const d = AccountInfo.parse(input);
     await prisma.lead.update({ where: { id }, data: d });
     await audit(user, "UPDATE", "Lead", id, `Company details updated`);
@@ -134,7 +139,7 @@ const ContactSchema = z.object({
 
 export async function saveLeadContact(leadId: string, contactId: string | null, input: z.input<typeof ContactSchema>): Promise<Result> {
   try {
-    const { user } = await editor();
+    const { user } = await editor(leadId);
     const d = ContactSchema.parse(input);
     if (d.isPrimary) await prisma.leadContact.updateMany({ where: { leadId }, data: { isPrimary: false } });
     if (contactId) await prisma.leadContact.update({ where: { id: contactId }, data: d });
@@ -157,7 +162,7 @@ export async function saveLeadContact(leadId: string, contactId: string | null, 
 
 export async function deleteLeadContact(contactId: string): Promise<Result> {
   try {
-    const { user } = await editor();
+    const { user } = await editor((await prisma.leadContact.findUniqueOrThrow({ where: { id: contactId }, select: { leadId: true } })).leadId);
     const c = await prisma.leadContact.delete({ where: { id: contactId } });
     await audit(user, "DELETE", "LeadContact", c.leadId, `Contact ${c.name} removed`);
     revalidatePath(`/leads/${c.leadId}`);
@@ -201,6 +206,7 @@ export async function saveOpportunity(id: string | null, input: Record<string, u
   try {
     const { user, by } = await editor();
     const d = OppSchema.parse(input);
+    if (d.leadId) await assertLeadAccess(user, d.leadId);
     if (!d.leadId && !d.clientId) throw new Error("An opportunity belongs to an account or a client");
     if (d.stage === "LOST" && !d.lostReason) throw new Error("Say why it was lost");
     const prev = id ? await prisma.opportunity.findUniqueOrThrow({ where: { id } }) : null;
@@ -208,6 +214,8 @@ export async function saveOpportunity(id: string | null, input: Record<string, u
     const owner = d.ownerId ? await prisma.user.findUnique({ where: { id: d.ownerId }, select: { id: true, name: true } }) : null;
     const ownerId = owner?.id ?? prev?.ownerId ?? user.id;
     const ownerName = owner?.name ?? prev?.ownerName ?? user.name;
+    // A won deal's owner earns its incentive: after the win only an owner may change it (Incentives → the deal).
+    if (prev?.stage === "WON" && ownerId !== prev.ownerId && !can(user.role, "incentives.manage")) throw new Error("This deal is won: its owner earns the incentive, so only an owner can change it");
     // Values only from people allowed to see this deal; otherwise the stored value stays.
     const mayValue = canSeeDeal(user, { ownerId: prev ? prev.ownerId : ownerId });
     const won = d.stage === "WON";
@@ -240,6 +248,12 @@ export async function saveOpportunity(id: string | null, input: Record<string, u
         if (lead.stage !== "WON") await changeStage(saved.leadId, "WON", { by, reason: `deal ${saved.code}`, data: { wonAt: new Date(), nextFollowUpAt: null } });
       }
     }
+    // Won now: record the sales incentive (onboarding decides it).
+    if (won && prev?.stage !== "WON") {
+      const monthly = ["DEDICATED", "MAINTENANCE"].includes(saved.model);
+      await recordAtWon({ opportunityId: saved.id, by, services: [{ key: "DEAL", label: saved.title, kind: monthly ? "MONTHLY" : "ONE_TIME", value: saved.value }], summary: `${saved.title} (${OPP_MODELS[saved.model] ?? saved.model})` });
+      revalidatePath("/leads/incentives");
+    }
     await audit(user, prev ? "UPDATE" : "CREATE", "Opportunity", saved.id, `${saved.code} ${saved.title}: ${saved.stage}`);
     touchOpp(saved);
     return { ok: true, message: won && !prev?.wonAt ? `${saved.code} won: it's in the onboarding queue.` : `${saved.code} saved.`, id: saved.id };
@@ -249,8 +263,8 @@ export async function saveOpportunity(id: string | null, input: Record<string, u
 }
 
 export async function deleteOpportunity(id: string) {
-  const { user } = await editor();
   const o = await prisma.opportunity.findUniqueOrThrow({ where: { id } });
+  const { user } = await editor(o.leadId);
   if (o.stage === "WON") throw new Error("Won deals can't be deleted");
   await prisma.opportunity.delete({ where: { id } });
   await audit(user, "DELETE", "Opportunity", id, `${o.code} deleted`);
@@ -294,6 +308,7 @@ const linkOrNull = (s: string | undefined) => {
 export async function importAccounts(input: { fileName: string; source: string; market: string; services: string[]; rows: unknown[] }): Promise<Result & { created?: number; merged?: number; contacts?: number; skipped?: number }> {
   try {
     const { user, by } = await editor();
+    await assertCanGenerate(user);
     const source = z.enum(Object.keys(IMPORT_SOURCES) as [string, ...string[]]).parse(input.source);
     if (!isMarket(input.market)) throw new Error("Pick a market");
     const defaultServices = serviceList.parse(input.services);
@@ -338,8 +353,7 @@ export async function importAccounts(input: { fileName: string; source: string; 
             siteState: clean(x.website) ? "OK" : "NONE",
             stage: "NEW",
             stageChangedAt: new Date(),
-            ownerId: user.id,
-            ownerName: user.name,
+            // Imported leads go to the pool, to be handed out (Distribute).
           },
         });
         leadId = lead.id;
@@ -372,6 +386,7 @@ export async function importAccounts(input: { fileName: string; source: string; 
 export async function undoImport(importId: string): Promise<Result> {
   try {
     const { user } = await editor();
+    await assertCanGenerate(user);
     const leads = await prisma.lead.findMany({ where: { importId, contactCount: 0, opportunities: { none: {} } }, select: { id: true } });
     const ids_ = leads.map((l) => l.id);
     await prisma.leadContact.deleteMany({ where: { leadId: { in: ids_ } } });

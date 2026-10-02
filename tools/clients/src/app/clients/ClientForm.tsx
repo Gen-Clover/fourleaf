@@ -25,6 +25,9 @@ export type ClientFields = {
   billingAddress?: string | null;
   gstin?: string | null;
   pan?: string | null;
+  cin?: string | null;
+  ein?: string | null;
+  identityVerifiedBy?: string | null;
   currency?: string | null;
   paymentTermsDays?: number | null;
   accountManager?: string | null;
@@ -35,28 +38,43 @@ export type ClientFields = {
  * Client record: identity, contact, billing and tax. The tax fields follow the country (see lib/taxProfile.ts):
  * Indian clients need the state (GST place of supply) and may have a GSTIN / PAN; clients abroad need neither.
  */
-export default function ClientForm({ client, readOnly, takenCodes = [], companyState = "" }: { client?: ClientFields; readOnly?: boolean; takenCodes?: string[]; companyState?: string }) {
+export default function ClientForm({
+  client,
+  readOnly,
+  takenCodes = [],
+  companyState = "",
+  identityLocked = false,
+}: {
+  client?: ClientFields;
+  readOnly?: boolean;
+  takenCodes?: string[];
+  companyState?: string;
+  /** GSTIN, PAN, CIN, EIN: once the client is active only an owner may change them (they decide "new client"). */
+  identityLocked?: boolean;
+}) {
   const { state, pending, form } = useFormAction(saveClient);
   const [code, setCode] = useState("");
   const [country, setCountry] = useState(client?.country ?? "India");
   const [region, setRegion] = useState(client?.state ?? "");
   const [gstin, setGstin] = useState(client?.gstin ?? "");
   const india = isIndia(country);
-  const f = (name: keyof ClientFields, label: string, opts: { type?: string; required?: boolean; placeholder?: string; upper?: boolean; hint?: string } = {}) => (
+  const f = (name: keyof ClientFields, label: string, opts: { type?: string; required?: boolean; placeholder?: string; upper?: boolean; hint?: string; locked?: boolean } = {}) => (
     <div>
       <label className="label">{label}{opts.required && " *"}</label>
       <input
         className={`input ${opts.upper ? "uppercase" : ""}`}
-        name={name}
+        name={opts.locked ? undefined : name}
         type={opts.type ?? "text"}
         defaultValue={(client?.[name] as string | number | null | undefined) ?? ""}
         required={opts.required}
         placeholder={opts.placeholder}
-        disabled={readOnly}
+        disabled={readOnly || opts.locked}
       />
+      {opts.locked && <input type="hidden" name={name} value={(client?.[name] as string | null | undefined) ?? ""} />}
       {opts.hint && <p className="mt-1 text-xs text-neutral-500">{opts.hint}</p>}
     </div>
   );
+  const lockedHint = "Locked: only an owner can change it once the client is active";
   return (
     <form {...form} className="card space-y-5 p-5">
       {client?.id && <input type="hidden" name="id" value={client.id} />}
@@ -150,12 +168,15 @@ export default function ClientForm({ client, readOnly, takenCodes = [], companyS
           <>
             <div>
               <label className="label">GSTIN</label>
-              <input className="input uppercase" name="gstin" value={gstin} onChange={(e) => setGstin(e.target.value.toUpperCase())} placeholder="e.g. 03ABCDE1234F1Z5" disabled={readOnly} />
-              <p className="mt-1 text-xs text-neutral-500">Only if they are GST registered. Must be from the state picked.</p>
+              <input className="input uppercase" name={identityLocked ? undefined : "gstin"} value={gstin} onChange={(e) => setGstin(e.target.value.toUpperCase())} placeholder="e.g. 03ABCDE1234F1Z5" disabled={readOnly || identityLocked} />
+              {identityLocked && <input type="hidden" name="gstin" value={gstin} />}
+              <p className="mt-1 text-xs text-neutral-500">{identityLocked ? lockedHint : "Only if they are GST registered. Must be from the state picked."}</p>
             </div>
-            {f("pan", "PAN", { placeholder: "e.g. ABCDE1234F", upper: true, hint: "Optional. Filled in from the GSTIN if left empty." })}
+            {f("pan", "PAN", { placeholder: "e.g. ABCDE1234F", upper: true, hint: identityLocked ? lockedHint : "Optional. Filled in from the GSTIN if left empty.", locked: identityLocked })}
+            {f("cin", "CIN / LLPIN", { placeholder: "e.g. U72900PB2020PTC051234", upper: true, hint: identityLocked ? lockedHint : "Companies and LLPs only (MCA register).", locked: identityLocked })}
           </>
         )}
+        {!india && f("ein", "EIN (USA)", { placeholder: "12-3456789", hint: identityLocked ? lockedHint : "From the client's W-9, if they gave one.", locked: identityLocked })}
         {f("paymentTermsDays", "Payment terms (days)", { type: "number", placeholder: "Default from settings" })}
         {f("timezone", "Time zone", { placeholder: india ? "Asia/Kolkata" : "e.g. America/New_York" })}
       </fieldset>
@@ -173,6 +194,11 @@ export default function ClientForm({ client, readOnly, takenCodes = [], companyS
           <textarea className="input" name="notes" rows={3} defaultValue={client?.notes ?? ""} disabled={readOnly} />
         </div>
       </div>
+      {!readOnly && !client?.id && (
+        <label className="flex items-center gap-2 text-xs text-neutral-600">
+          <input type="checkbox" name="confirmedDifferent" /> Checked: different business (only if asked, when the website, phone or name matches an existing client)
+        </label>
+      )}
       {!readOnly && (
         <div className="flex items-center gap-3">
           <button className="btn-primary" disabled={pending}>{pending ? "Saving…" : client?.id ? "Save client" : "Create client"}</button>

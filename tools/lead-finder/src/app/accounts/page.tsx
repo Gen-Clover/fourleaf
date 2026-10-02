@@ -7,6 +7,7 @@ import { B2B_SERVICES, INDUSTRIES, OPEN_OPP_STAGES, serviceLabel } from "../../l
 import { NO_DEAL } from "../../lib/dealAccess";
 import { SOURCES } from "../../lib/services";
 import { StageBadge } from "../bits";
+import { leadScope } from "../../lib/scope";
 
 /** Company accounts (B2B): typed in, from LinkedIn, or imported. Local businesses from Google Maps are under Leads. */
 export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ industry?: string; service?: string; owner?: string; q?: string; source?: string }> }) {
@@ -21,15 +22,16 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     ...(sp.source && SOURCES[sp.source] ? { source: sp.source } : {}),
     ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { code: { contains: q, mode: "insensitive" } }, { contactName: { contains: q, mode: "insensitive" } }, { website: { contains: q, mode: "insensitive" } }] } : {}),
   };
+  const scoped = { AND: [await leadScope(user), where] };
   const [accounts, total] = await Promise.all([
     prisma.lead.findMany({
-      where,
+      where: scoped,
       omit: NO_DEAL,
       orderBy: { updatedAt: "desc" },
       take: 300,
       include: { _count: { select: { contacts: true } }, opportunities: { where: { stage: { in: OPEN_OPP_STAGES } }, select: { id: true } } },
     }),
-    prisma.lead.count({ where }),
+    prisma.lead.count({ where: scoped }),
   ]);
   const canEdit = can(user.role, "leads.edit");
   const sel = (name: string, value: string | undefined, options: [string, string][]) => (

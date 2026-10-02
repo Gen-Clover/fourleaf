@@ -114,7 +114,14 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
         </div>
       )}
 
-      {tab === "details" && <ClientForm client={client} readOnly={!canEdit} companyState={await companyState()} />}
+      {tab === "details" && (
+        <ClientForm
+          client={client}
+          readOnly={!canEdit}
+          companyState={await companyState()}
+          identityLocked={client.status !== "ONBOARDING" && !can(user.role, "incentives.manage")}
+        />
+      )}
 
       {tab === "agreements" && (
         <div className="card overflow-x-auto">

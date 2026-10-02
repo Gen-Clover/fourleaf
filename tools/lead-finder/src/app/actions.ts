@@ -8,6 +8,8 @@ import { audit } from "@genclover/db/audit";
 import { enqueue } from "@genclover/db/jobs";
 import * as ids from "@genclover/ids";
 import { assertPermission } from "@genclover/auth";
+import { assertNotDuplicate } from "../lib/duplicates";
+import { assertCanGenerate, assertLeadAccess } from "../lib/scope";
 import { errMsg, type Result } from "@genclover/ui/result";
 import { type Area, expand, grid, isRect } from "../lib/geo";
 import { costOf, findArea, monthUsage } from "../lib/google";
@@ -46,10 +48,24 @@ export type Estimate = {
   capUsd?: number;
 };
 
+/** Searches spend money and fill the pool: the owner, and managers the owner allows (lib/scope.ts). */
+async function generator() {
+  const user = await assertPermission("leads.edit");
+  await assertCanGenerate(user);
+  return user;
+}
+
+/** Working a lead: only someone who may see it (its owner, their manager, an owner). */
+async function worker(leadIds: string | string[]) {
+  const user = await assertPermission("leads.edit");
+  await assertLeadAccess(user, leadIds);
+  return user;
+}
+
 /** Look up each place's boundary and estimate requests and cost before anything runs. */
 export async function estimateSearch(input: SearchInputT): Promise<Estimate> {
   try {
-    await assertPermission("leads.edit");
+    await generator();
     if (!googleKeyConfigured()) return { ok: false, message: "Add GOOGLE_MAPS_API_KEY to .env to search Google Maps." };
     const d = SearchInput.parse(input);
     const niche = await prisma.leadNiche.findUniqueOrThrow({ where: { key: d.nicheKey } });
@@ -78,7 +94,7 @@ export async function estimateSearch(input: SearchInputT): Promise<Estimate> {
 export async function startSearch(input: SearchInputT & { resolved: Area[]; repeat?: { dayOfWeek: number; hour: number } | null }): Promise<Result> {
   let id = "";
   try {
-    const user = await assertPermission("leads.edit");
+    const user = await generator();
     const d = SearchInput.parse(input);
     const areas = z.array(z.object({ name: z.string() }).passthrough()).parse(input.resolved) as Area[];
     if (!areas.length || !areas.every(isRect)) throw new Error("Estimate the search first");
@@ -112,7 +128,7 @@ export async function startSearch(input: SearchInputT & { resolved: Area[]; repe
 
 /** A quick search hit Google's 60 limit in some places: search just those places thoroughly (grid + splitting). */
 export async function deepenSearch(id: string) {
-  const user = await assertPermission("leads.edit");
+  const user = await generator();
   const search = await prisma.leadSearch.findUniqueOrThrow({ where: { id } });
   const s = await getLfSettings();
   const items = search.saturated.map((x) => JSON.parse(x) as { phrase: string; rect: CellPayload["rect"]; area: string });
@@ -131,7 +147,7 @@ export async function deepenSearch(id: string) {
 }
 
 export async function setScheduleActive(id: string, active: boolean) {
-  const user = await assertPermission("leads.edit");
+  const user = await generator();
   const cur = await prisma.leadSchedule.findUniqueOrThrow({ where: { id } });
   const sch = await prisma.leadSchedule.update({ where: { id }, data: { active, ...(active ? { nextRunAt: nextWeekly(cur.dayOfWeek, cur.hour) } : {}) } });
   await audit(user, "UPDATE", "LeadSchedule", id, `${active ? "Resumed" : "Paused"} weekly search ${sch.name}`);
@@ -139,20 +155,20 @@ export async function setScheduleActive(id: string, active: boolean) {
 }
 
 export async function deleteSchedule(id: string) {
-  const user = await assertPermission("leads.edit");
+  const user = await generator();
   const sch = await prisma.leadSchedule.delete({ where: { id } });
   await audit(user, "DELETE", "LeadSchedule", id, `Deleted weekly search ${sch.name}`);
   revalidatePath("/leads/searches");
 }
 
 export async function runScheduleNow(id: string) {
-  await assertPermission("leads.edit");
+  await generator();
   await prisma.leadSchedule.update({ where: { id }, data: { nextRunAt: new Date() } });
   revalidatePath("/leads/searches");
 }
 
 export async function stopSearch(id: string) {
-  const user = await assertPermission("leads.edit");
+  const user = await generator();
   await prisma.job.updateMany({ where: { group: id, status: { in: ["QUEUED", "PAUSED"] } }, data: { status: "CANCELLED" } });
   await prisma.leadSearch.update({ where: { id }, data: { status: "STOPPED", finishedAt: new Date() } });
   await audit(user, "UPDATE", "LeadSearch", id, "Stopped lead search");
@@ -160,7 +176,7 @@ export async function stopSearch(id: string) {
 }
 
 export async function resumeSearch(id: string) {
-  const user = await assertPermission("leads.edit");
+  const user = await generator();
   const { count } = await prisma.job.updateMany({ where: { group: id, status: "PAUSED" }, data: { status: "QUEUED", runAfter: new Date() } });
   await prisma.leadSearch.update({ where: { id }, data: { status: count ? "RUNNING" : "DONE", error: null, finishedAt: count ? null : new Date() } });
   await audit(user, "UPDATE", "LeadSearch", id, `Resumed lead search (${count} cells)`);
@@ -189,6 +205,8 @@ export async function addLead(_: Result, fd: FormData): Promise<Result> {
   try {
     const user = await assertPermission("leads.edit");
     const d = NewLead.parse(Object.fromEntries(fd));
+    // Checked against every lead and client in the company, then it's the adder's own lead.
+    await assertNotDuplicate({ name: d.name, phone: d.phone, website: d.website, email: d.email, area: d.area });
     const code = await ids.nextLeadId(prisma);
     const website = d.website ? normalizeUrl(d.website) : null;
     const lead = await prisma.lead.create({
@@ -205,10 +223,16 @@ export async function addLead(_: Result, fd: FormData): Promise<Result> {
         contactName: d.contactName,
         area: d.area,
         auditStatus: website ? "PENDING" : "NONE",
+        ownerId: user.id,
+        ownerName: user.name,
+        assignedAt: new Date(),
+        assignedVia: "SELF",
+        createdById: user.id,
+        createdByName: user.name,
       },
     });
     id = lead.id;
-    await prisma.leadActivity.create({ data: { leadId: id, type: "SYSTEM", text: `Added by hand (${SOURCES[d.source]})`, byId: user.id, byName: user.name } });
+    await prisma.leadActivity.create({ data: { leadId: id, type: "SYSTEM", text: `Added by hand by ${user.name} (${SOURCES[d.source]}): theirs`, byId: user.id, byName: user.name } });
     if (d.note) await prisma.leadActivity.create({ data: { leadId: id, type: "NOTE", text: d.note, byId: user.id, byName: user.name } });
     if (website) await enqueue(prisma, { type: "LF_AUDIT", payload: { leadId: id }, group: "audit:manual" });
     else await rescore(id);
@@ -229,7 +253,7 @@ const LeadDetails = z.object({
 
 export async function saveLeadDetails(id: string, _: Result, fd: FormData): Promise<Result> {
   try {
-    const user = await assertPermission("leads.edit");
+    const user = await worker(id);
     const d = LeadDetails.parse(Object.fromEntries(fd));
     const prev = await prisma.lead.findUniqueOrThrow({ where: { id } });
     const website = d.website ? normalizeUrl(d.website) : null;
@@ -258,7 +282,7 @@ export async function saveLeadDetails(id: string, _: Result, fd: FormData): Prom
 /** A note, or a message/call/visit (which moves the lead on and schedules the next follow-up). */
 export async function logActivity(id: string, input: { type: string; text: string; service?: string | null }): Promise<Result> {
   try {
-    const user = await assertPermission("leads.edit");
+    const user = await worker(id);
     const type = z.enum(["NOTE", ...OUTREACH_TYPES] as [string, ...string[]]).parse(input.type);
     const text = z.string().trim().min(1, "Write something").max(4000).parse(input.text);
     const service = input.service && /^[A-Z_]{2,30}$/.test(input.service) ? input.service : null;
@@ -272,7 +296,7 @@ export async function logActivity(id: string, input: { type: string; text: strin
 }
 
 export async function setDoNotContact(id: string, value: boolean) {
-  const user = await assertPermission("leads.edit");
+  const user = await worker(id);
   const lead = await prisma.lead.update({ where: { id }, data: { doNotContact: value, ...(value ? { nextFollowUpAt: null } : {}) } });
   await prisma.leadActivity.create({ data: { leadId: id, type: "SYSTEM", text: value ? "Marked do not contact" : "Removed from do not contact", byId: user.id, byName: user.name } });
   await audit(user, "UPDATE", "Lead", id, `${lead.code}: ${value ? "do not contact" : "contact allowed again"}`);
@@ -280,7 +304,7 @@ export async function setDoNotContact(id: string, value: boolean) {
 }
 
 export async function recheckWebsite(id: string, speedTest = false) {
-  await assertPermission("leads.edit");
+  await worker(id);
   await prisma.lead.update({ where: { id }, data: { auditStatus: "PENDING" } });
   await enqueue(prisma, { type: speedTest ? "LF_SPEED" : "LF_AUDIT", payload: { leadId: id }, group: "audit:manual" });
   revalidatePath(`/leads/${id}`);
@@ -288,8 +312,8 @@ export async function recheckWebsite(id: string, speedTest = false) {
 
 export async function bulkAction(idsIn: string[], action: "QUALIFY" | "NOT_A_FIT" | "SPEED" | "RECHECK" | "REFRESH", reason?: string): Promise<Result> {
   try {
-    const user = await assertPermission("leads.edit");
     const leadIds = z.array(z.string()).min(1, "Select some leads").max(500).parse(idsIn);
+    const user = await worker(leadIds);
     if (action === "REFRESH") {
       const n = await queueRefresh(leadIds);
       await audit(user, "UPDATE", "Lead", null, `Queued Google data refresh for ${n} selected lead(s)`);
