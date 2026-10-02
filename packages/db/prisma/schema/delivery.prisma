@@ -1,0 +1,42 @@
+// Delivery & Resources tool: weekly timesheet approval and resource requests.
+
+/// One person's week (Monday). status: DRAFT | SUBMITTED | APPROVED | REJECTED.
+/// Only approved hours are paid to hourly people and billed to clients.
+model TimesheetWeek {
+  id          String    @id @default(cuid()) @map("_id")
+  personId    String
+  person      Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  weekStart   DateTime
+  status      String    @default("DRAFT")
+  hours       Float     @default(0)
+  submittedAt DateTime?
+  decidedAt   DateTime?
+  decidedBy   String?
+  note        String?
+
+  @@unique([personId, weekStart])
+  @@index([status])
+}
+
+/// A project manager asks for a person; the resource manager fills it (creates the assignment).
+/// status: OPEN | FILLED | CANCELLED
+model ResourceRequest {
+  id            String    @id @default(cuid()) @map("_id")
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role          String
+  skills        String?
+  hoursPerMonth Float     @default(0)
+  startDate     DateTime?
+  endDate       DateTime?
+  status        String    @default("OPEN")
+  personId      String?
+  requestedBy   String
+  decidedBy     String?
+  note          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+  @@index([projectId])
+}

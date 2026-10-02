@@ -14,6 +14,7 @@
     "@genclover/db": "*",
     "@genclover/ids": "*",
     "@genclover/ui": "*",
+    "jszip": "^3.10.2",
     "recharts": "^3.10.1",
     "server-only": "^0.0.1",
     "zod": "^4.6.5"

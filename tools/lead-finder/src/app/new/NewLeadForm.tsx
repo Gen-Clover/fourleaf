@@ -1,11 +1,11 @@
 "use client";
 
-import { useActionState } from "react";
 import { SOURCES } from "../../lib/services";
 import { addLead } from "../actions";
+import { useFormAction } from "@genclover/ui/form-action";
 
 export default function NewLeadForm({ niches }: { niches: { key: string; label: string }[] }) {
-  const [state, action, pending] = useActionState(addLead, undefined);
+  const { state, pending, form } = useFormAction(addLead);
   const field = (name: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
     <div>
       <label className="label" htmlFor={name}>{label}{props.required && " *"}</label>
@@ -13,7 +13,7 @@ export default function NewLeadForm({ niches }: { niches: { key: string; label: 
     </div>
   );
   return (
-    <form action={action} className="card max-w-3xl space-y-4 p-5">
+    <form {...form} className="card max-w-3xl space-y-4 p-5">
       <div className="grid gap-4 md:grid-cols-2">
         {field("name", "Business name", { required: true })}
         <div>

@@ -1,0 +1,72 @@
+// Clients & Agreements tool: client contacts, and every agreement with a client (NDA, MSA, SOW, change
+// requests, SLAs, acceptance certificates…) with its status, dates and versions. Amounts are finance-only.
+
+/// A person at the client: who signs, who approves, who pays.
+model ClientContact {
+  id          String   @id @default(cuid()) @map("_id")
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name        String
+  title       String?
+  email       String?
+  phone       String?
+  linkedinUrl String?
+  isPrimary   Boolean  @default(false)
+  isBilling   Boolean  @default(false)
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([clientId])
+}
+
+/// type: NDA | MSA | SOW | CR | RESOURCE | SLA | SUPPORT | ACCEPTANCE | DPA | OTHER
+/// status: DRAFT | SENT | SIGNED | ACTIVE | EXPIRED | TERMINATED | SUPERSEDED
+/// code: client-level <code>-A01 (NDA, MSA, SLA…); project-level <project>-S01 (SOW), <project>-CR01 (change
+/// request), <project>-AC01 (acceptance). value / currency are money: shown to finance roles only.
+model Agreement {
+  id                String             @id @default(cuid()) @map("_id")
+  code              String             @unique
+  clientId          String
+  client            Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  projectId         String?
+  project           Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  parentId          String? // a SOW under its MSA, a change request under its SOW
+  type              String
+  title             String
+  status            String             @default("DRAFT")
+  version           Int                @default(1)
+  documentUrl       String?
+  scopeSummary      String? // what is in and out of scope (delivery can read this)
+  estimatedHours    Float?
+  value             Float?
+  currency          String?
+  signedAt          DateTime?
+  effectiveFrom     DateTime?
+  expiresAt         DateTime?
+  renewalNoticeDays Int                @default(30)
+  remindedAt        DateTime?
+  ownerName         String?
+  notes             String?
+  createdBy         String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  versions          AgreementVersion[]
+
+  @@index([clientId])
+  @@index([projectId])
+  @@index([expiresAt])
+}
+
+/// Every version of an agreement's document, newest last.
+model AgreementVersion {
+  id          String    @id @default(cuid()) @map("_id")
+  agreementId String
+  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  version     Int
+  documentUrl String?
+  note        String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+
+  @@index([agreementId])
+}

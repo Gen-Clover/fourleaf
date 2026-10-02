@@ -55,12 +55,41 @@ export const STATUS_LABEL: Record<string, string> = {
   EMPLOYEE: "Employee",
   CONTRACTOR: "Contractor",
   UNPAID: "Unpaid",
+  SIGNED: "Signed",
+  EXPIRED: "Expired",
+  TERMINATED: "Terminated",
+  SUPERSEDED: "Superseded",
+  ONBOARDING: "Onboarding",
+  INACTIVE: "Inactive",
+  SUBMITTED: "Submitted",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  PENDING: "Pending",
+  OPEN: "Open",
+  FILLED: "Filled",
+  ISSUED: "Issued",
+  CLOSED: "Closed",
+  IN_REVIEW: "In review",
+  ESCALATED: "Escalated",
+  DECIDED: "Decided",
+  FILED: "Filed",
+  OVERDUE: "Overdue",
+  DUE: "Due soon",
+  UPCOMING: "Upcoming",
+  DISCOVERY: "Discovery",
+  QUALIFIED: "Qualified",
+  PROPOSAL: "Proposal",
+  WON: "Won",
+  LOST: "Lost",
 };
+
+/** Label for a status key: from STATUS_LABEL, else the key in sentence case (IN_REVIEW → In review). */
+export const statusLabel = (s: string) => STATUS_LABEL[s] ?? (s.charAt(0) + s.slice(1).toLowerCase()).replace(/_/g, " ");
 
 export const PROJECT_STATUSES = ["DRAFT", "QUOTED", "NEGOTIATION", "ACTIVE", "ON_HOLD", "COMPLETED", "CANCELLED"];
 /** A care plan (hosting, updates, support after go-live) is a project of its own, with its own ID. */
-export const PROJECT_KINDS = ["PROJECT", "CARE"] as const;
-export const KIND_LABEL: Record<string, string> = { PROJECT: "Project", CARE: "Care plan" };
+export const PROJECT_KINDS = ["PROJECT", "CARE", "PRODUCT", "INTERNAL"] as const;
+export const KIND_LABEL: Record<string, string> = { PROJECT: "Client project", CARE: "Care / support plan", PRODUCT: "Gen Clover product", INTERNAL: "Internal (bench, R&D, admin)" };
 export const MONTH_STATUSES = ["DRAFT", "INVOICED", "PAID"];
 export const TIERS = ["STANDARD", "FLOOR", "PREMIUM", "CUSTOM"];
 export const INVOICE_STATUSES = ["DRAFT", "SENT", "PARTIAL", "PAID", "VOID"];
@@ -69,4 +98,8 @@ export const COMMITMENT_KINDS: Record<string, string> = { CONTRACTOR: "Contracto
 export const FREQUENCIES: Record<string, string> = { ONE_OFF: "One-off", MONTHLY: "Monthly", QUARTERLY: "Quarterly", YEARLY: "Yearly" };
 export const OBLIGATION_KINDS: Record<string, string> = { PAYROLL: "Payroll", BILL: "Unpaid bills", ...COMMITMENT_KINDS };
 export const STAGES: Record<string, string> = { STARTUP: "Startup", GROWTH: "Growth", MATURE: "Mature", CUSTOM: "Custom" };
-export const LINE_KINDS: Record<string, string> = { SERVICES: "Services", PASS_THROUGH: "Pass-through (at cost)", OTHER: "Other" };
+export const LINE_KINDS: Record<string, string> = { SERVICES: "Services", MILESTONE: "Milestone (fixed price)", PASS_THROUGH: "Pass-through (at cost)", OTHER: "Other" };
+
+/** Money in its own currency: ₹1,20,000 or $4,500.00. */
+export const money = (n: number | null | undefined, currency: string | null | undefined, digits = 0) =>
+  n == null || Number.isNaN(n) ? "—" : currency === "INR" ? inr(n, digits) : usd(n, digits);

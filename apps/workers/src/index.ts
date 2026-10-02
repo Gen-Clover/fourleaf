@@ -10,6 +10,7 @@ import {
   leadFinderScheduler,
   type JobHandler,
 } from "@genclover/lead-finder/jobs";
+import { governanceReminders } from "@genclover/governance/jobs";
 
 /** Every tool's job handlers. Add a tool's handlers here to run its jobs. */
 const HANDLERS: Record<string, JobHandler> = { ...leadFinderJobs };
@@ -19,6 +20,7 @@ const MAINTENANCE: { name: string; everyMs: number; firstAfterMs: number; run: (
   { name: "lead-finder inbox", everyMs: 10 * 60_000, firstAfterMs: 20_000, run: leadFinderInbox },
   { name: "lead-finder auto email", everyMs: 15 * 60_000, firstAfterMs: 40_000, run: leadFinderAutoEmail },
   { name: "lead-finder maintenance", everyMs: 6 * 3_600_000, firstAfterMs: 30_000, run: leadFinderMaintenance },
+  { name: "governance reminders", everyMs: 3 * 3_600_000, firstAfterMs: 60_000, run: governanceReminders },
 ];
 
 /** Log a maintenance result only when it did something (skips {sent: 0}, {} …). */

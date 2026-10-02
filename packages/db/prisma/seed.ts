@@ -1,5 +1,6 @@
 // Seeds the portal from docs/finance/Gen-Clover-Rate-Card-2026.md (Final v2).
 import bcrypt from "bcryptjs";
+import { applyFinalAllocation, BUCKET_PURPOSE, POLICY_KEYS, SUBCATEGORIES } from "./allocation";
 // The shared client: omitted optional fields are stored as null (see src/sql-nulls.ts).
 import { prisma } from "../src/index";
 
@@ -33,6 +34,13 @@ const settings = [
   { key: "bankDetails", value: "", label: "Bank / remittance details", group: "Invoicing", type: "text", description: "Beneficiary, account, SWIFT — printed on invoices" },
   { key: "invoicePrefix", value: "GCI", label: "Invoice number prefix", group: "Invoicing", type: "text", description: "Invoices are numbered PREFIX/26-27/0001: one consecutive series per financial year (GST). Change it only before a year's first invoice." },
   { key: "paymentTermsDays", value: "30", label: "Payment terms", group: "Invoicing", unit: "days" },
+  { key: "companyState", value: "Punjab", label: "State of registration (GST)", group: "Invoicing", type: "text", description: "Same state as the client = CGST + SGST; another state = IGST; outside India = export under LUT" },
+  { key: "companyPan", value: "", label: "Company PAN", group: "Invoicing", type: "text" },
+  { key: "gstRatePct", value: "18", label: "GST rate on services", group: "Invoicing", unit: "%", description: "IT services (SAC 998314) are 18%" },
+  // Pay, approvals and costing
+  { key: "tdsContractorPct", value: "10", label: "TDS on contractor payments", group: "Pay & approvals", unit: "%", description: "Default deduction on contractor invoices (e.g. 10% under section 194J); set per person if different. Confirm with your CA." },
+  { key: "approvalLimitInr", value: "25000", label: "Second approval above", group: "Pay & approvals", unit: "₹", description: "Expenses at or above this need a second person to approve before they are paid. Pay runs always do." },
+  { key: "overheadPerHourInr", value: "0", label: "Overhead per logged hour", group: "Pay & approvals", unit: "₹ / hr", description: "Rent, tools, admin spread over hours, for project margin after overhead. 0 = off." },
   // Treasury & alerts (CFO dashboard)
   { key: "runwayTargetMonths", value: "12", label: "Survival runway target", group: "Treasury & alerts", unit: "months", description: "Survival fund ÷ monthly unavoidable burn" },
   { key: "runwayMinMonths", value: "6", label: "Survival runway minimum", group: "Treasury & alerts", unit: "months", description: "Below this is a critical alert" },
@@ -58,6 +66,10 @@ const settings = [
   { key: "lfDailyNewContacts", value: "30", label: "New contacts per day", group: "Lead Finder", unit: "leads", description: "First messages the Today queue offers each day, on top of due follow-ups" },
   { key: "lfEmailDailyLimit", value: "40", label: "Emails per day", group: "Lead Finder", unit: "emails", description: "Most emails the portal sends in a day, to protect the sending domain" },
   { key: "lfAutoEmailFollowUps", value: "0", label: "Send email follow-ups automatically", group: "Lead Finder", unit: "1 = on", description: "After a person sends the first email, the worker sends follow-ups during business hours. Stops on reply." },
+  { key: "lfStuckRepliedDays", value: "2", label: "Stuck in Replied after", group: "Lead Finder", unit: "days", description: "Replied but no call, meeting or proposal since" },
+  { key: "lfStuckMeetingDays", value: "3", label: "Stuck in Call / meeting after", group: "Lead Finder", unit: "days" },
+  { key: "lfStuckProposalDays", value: "7", label: "Stuck in Proposal sent after", group: "Lead Finder", unit: "days", description: "Proposal sent and no answer since" },
+  { key: "lfBookingLink", value: "", label: "Booking link", group: "Lead Finder", type: "text", description: "Calendly, Cal.com or Google booking page, added to suggested replies" },
   { key: "lfNoReplyDays", value: "7", label: "Close as No reply after", group: "Lead Finder", unit: "days", description: "Days after the last follow-up with no reply. 0 = off." },
 ];
 
@@ -89,56 +101,28 @@ const niches: { key: string; label: string; phrases: string[]; market?: string; 
 
 // Allocation policies by company stage. Keys = AllocationBucket keys; each policy totals 100%.
 // Order: delivery, growth (Talent/R&D), corpOps, technology, sales, risk (Working Capital), survival, ventures, bizdev, profit
-const POLICY_KEYS = ["delivery", "growth", "corpOps", "technology", "sales", "risk", "survival", "ventures", "bizdev", "profit"];
 const policies: { name: string; stage: string; description: string; pct: number[]; active?: boolean }[] = [
-  { name: "Rate Card v2 (65/10/25)", stage: "CUSTOM", active: true, description: "The allocation the 2026 rate card is priced on. No survival, venture or BD funds.", pct: [65, 10, 8, 4, 4, 4, 0, 0, 0, 5] },
+  { name: "Rate Card v2 (65/10/25)", stage: "CUSTOM", description: "The allocation the 2026 rate card is priced on. No survival, venture or BD funds.", pct: [65, 10, 8, 4, 4, 4, 0, 0, 0, 5] },
   { name: "Base allocation", stage: "CUSTOM", description: "Research base model: delivery 55%, 10% survival reserve, ventures and BD funded.", pct: [55, 5, 7, 3, 4, 4, 10, 4, 2, 6] },
   { name: "Startup", stage: "STARTUP", description: "Proposal — prioritises survival, delivery and sales. Review before use.", pct: [56, 4, 7, 3, 6, 4, 12, 1, 2, 5] },
   { name: "Growth", stage: "GROWTH", description: "Proposal — prioritises talent/hiring, sales and delivery capacity. Review before use.", pct: [56, 8, 6, 3, 6, 4, 8, 2, 3, 4] },
   { name: "Mature", stage: "MATURE", description: "Proposal — prioritises profit, ventures and investments. Review before use.", pct: [52, 5, 6, 3, 4, 4, 8, 7, 2, 9] },
 ];
 
-// Expense categories → allocation bucket (null = client pass-through, outside the 65/10/25 model)
-const categories: [string, string | null][] = [
-  ["Salaries (employees)", "delivery"],
-  ["Contractor payments", "delivery"],
-  ["Hiring & recruitment", "growth"],
-  ["Training & certifications", "growth"],
-  ["AI R&D", "growth"],
-  ["Incentives / ESOP", "growth"],
-  ["CA, audit & accounting", "corpOps"],
-  ["Legal & compliance (ROC)", "corpOps"],
-  ["Bank charges", "corpOps"],
-  ["Office & admin", "corpOps"],
-  ["Software & AI tools", "technology"],
-  ["Cloud & hosting (internal)", "technology"],
-  ["Hardware & devices", "technology"],
-  ["Marketing & website", "sales"],
-  ["Sales & BD travel", "sales"],
-  ["Bad debt / write-off", "risk"],
-  ["Bench cost", "risk"],
-  ["Taxes & statutory dues", "corpOps"],
-  ["Client meetings & travel", "bizdev"],
-  ["Conferences, events & networking", "bizdev"],
-  ["Memberships, books & research", "bizdev"],
-  ["New product / venture spend", "ventures"],
-  ["Strategic investment", "ventures"],
-  ["Emergency spend (survival)", "survival"],
-  ["Profit distribution", "profit"],
-  ["Client pass-through (hosting, APIs, SaaS)", null],
-];
+// Expense categories (each bucket's subcategories): prisma/allocation.ts
+const categories = SUBCATEGORIES;
 
 const buckets = [
-  { key: "delivery", name: "Delivery", percent: 65, category: "DELIVERY", description: "Resource/delivery compensation pool" },
-  { key: "growth", name: "Growth / Talent / R&D", percent: 10, category: "GROWTH", description: "Hiring, contractors, training, AI R&D, ESOP/incentives" },
-  { key: "corpOps", name: "Corporate Operations", percent: 8, category: "CORPORATE", description: "CA, audit, ROC, legal, accounting, banking, compliance" },
-  { key: "technology", name: "Technology / Infrastructure", percent: 4, category: "CORPORATE", description: "AI tools, Microsoft 365, GitHub, cloud, security, software" },
-  { key: "sales", name: "Sales / Marketing", percent: 4, category: "CORPORATE", description: "Lead generation, website, CRM, proposals, marketing, BD" },
-  { key: "risk", name: "Working Capital / Risk", percent: 4, category: "CORPORATE", description: "Payment delays, FX, bench, bad debt" },
-  { key: "survival", name: "Survival Reserve", percent: 0, category: "CORPORATE", description: "Runway reserve — target 12 months of unavoidable burn" },
-  { key: "ventures", name: "Ventures & Investments", percent: 0, category: "GROWTH", description: "New products, new companies, investments, acquisitions" },
-  { key: "bizdev", name: "Business Development & Founder Ops", percent: 0, category: "CORPORATE", description: "Client meetings, travel, conferences, networking, memberships, market exploration" },
-  { key: "profit", name: "Retained Company Profit", percent: 5, category: "CORPORATE", isProfit: true, description: "Actual retained profit / capital accumulation" },
+  { key: "delivery", name: "Delivery", percent: 40, category: "DELIVERY", description: BUCKET_PURPOSE.delivery },
+  { key: "growth", name: "Growth / Talent / R&D", percent: 7, category: "GROWTH", description: BUCKET_PURPOSE.growth },
+  { key: "corpOps", name: "Corporate Operations", percent: 7, category: "CORPORATE", description: BUCKET_PURPOSE.corpOps },
+  { key: "technology", name: "Technology / Infrastructure", percent: 4, category: "CORPORATE", description: BUCKET_PURPOSE.technology },
+  { key: "sales", name: "Sales / Marketing", percent: 5, category: "CORPORATE", description: BUCKET_PURPOSE.sales },
+  { key: "risk", name: "Working Capital / Risk", percent: 9, category: "CORPORATE", description: BUCKET_PURPOSE.risk },
+  { key: "survival", name: "Survival Reserve", percent: 5, category: "CORPORATE", description: BUCKET_PURPOSE.survival },
+  { key: "ventures", name: "Ventures & Investments", percent: 3, category: "GROWTH", description: BUCKET_PURPOSE.ventures },
+  { key: "bizdev", name: "Business Development & Founder Ops", percent: 5, category: "CORPORATE", description: BUCKET_PURPOSE.bizdev },
+  { key: "profit", name: "Retained Company Profit", percent: 15, category: "CORPORATE", isProfit: true, description: BUCKET_PURPOSE.profit },
 ];
 
 // [name, family, marketMin, marketMax, usSalary, standard, floor, ctcMin, ctcMax]
@@ -212,14 +196,88 @@ async function main() {
       create: { name: p.name, stage: p.stage, description: p.description, allocations, active: !hasActive && !!p.active },
     });
   }
+  // The final allocation (Oct 2026) and the subcategories: active on a new database.
+  await applyFinalAllocation(prisma, console.log);
 
   const email = (process.env.SEED_ADMIN_EMAIL || "admin@genclover.local").toLowerCase();
   const password = process.env.SEED_ADMIN_PASSWORD || "ChangeMe@2026";
   const admin = await prisma.user.upsert({
     where: { email },
     update: {},
-    create: { name: "Gen Clover Admin", email, role: "ADMIN", passwordHash: await bcrypt.hash(password, 10) },
+    create: { name: "Gen Clover Admin", email, role: "OWNER", passwordHash: await bcrypt.hash(password, 10) },
   });
+
+  // One test account per role, for trying out what each role sees. Never in production.
+  const roleUsers: [string, string, string, string][] = [
+    ["CFO", "Test CFO", "cfo@genclover.local", "Cfo@Gc2026"],
+    ["SALES", "Test Sales", "sales@genclover.local", "Sales@Gc2026"],
+    ["ONBOARDING", "Test Onboarding", "onboarding@genclover.local", "Onboard@Gc2026"],
+    ["DELIVERY", "Test Delivery Manager", "delivery@genclover.local", "Delivery@Gc2026"],
+    ["TEAM", "Test Team Member", "team@genclover.local", "Team@Gc2026"],
+    ["HR", "Test HR", "hr@genclover.local", "Hr@Gc2026"],
+    ["ACCOUNTANT", "Test Accountant (CA)", "ca@genclover.local", "Ca@Gc2026"],
+  ];
+  if (process.env.NODE_ENV !== "production") {
+    for (const [role, name, userEmail, userPassword] of roleUsers) {
+      await prisma.user.upsert({ where: { email: userEmail }, update: {}, create: { name, email: userEmail, role, passwordHash: await bcrypt.hash(userPassword, 10) } });
+    }
+    // The team member logs hours as this People record (matched by email). No salary, so it adds no cost.
+    if (!(await prisma.person.findFirst({ where: { email: "team@genclover.local" } }))) {
+      await prisma.person.create({ data: { name: "Test Team Member", email: "team@genclover.local", title: "Developer", costInr: 0, notes: "Test account for the Team member role. Safe to delete." } });
+    }
+  }
+
+  // Gen Clover itself, as a client: products and internal work (bench, R&D, admin) are projects under it, so their
+  // cost is tracked apart from client work. Code GCL.
+  if (!(await prisma.client.findUnique({ where: { code: "GCL" } }))) {
+    const year = new Date().getFullYear();
+    const seq = await prisma.sequence.upsert({ where: { key: `client:${year}` }, create: { key: `client:${year}`, value: 1 }, update: { value: { increment: 1 } } });
+    await prisma.client.create({
+      data: { number: `GC-${year}-${String(seq.value).padStart(4, "0")}`, code: "GCL", name: "Gen Clover (internal)", country: "India", currency: "INR", status: "ACTIVE", notes: "Internal: Gen Clover products, bench, R&D and admin time." },
+    });
+  }
+
+  // Compliance calendar for an Indian private limited company: a starting list. Due dates roll forward when each
+  // filing is marked done. Confirm the exact applicability and dates with the CA / CS.
+  if ((await prisma.complianceItem.count()) === 0) {
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = now.getUTCMonth();
+    const next = (day: number, monthOffset = 0) => {
+      let d = new Date(Date.UTC(y, m + monthOffset, day));
+      if (d < now) d = new Date(Date.UTC(y, m + monthOffset + 1, day));
+      return d;
+    };
+    const nextOf = (months: number[], day: number) => {
+      for (let i = 0; i < 24; i++) {
+        const d = new Date(Date.UTC(y, m + i, day));
+        if (months.includes(d.getUTCMonth() + 1) && d >= now) return d;
+      }
+      return next(day);
+    };
+    const items: { name: string; category: string; authority: string; frequency: string; dueDate: Date; notes?: string; remindDays?: number }[] = [
+      { name: "GSTR-1 (outward supplies)", category: "GST", authority: "GST portal", frequency: "MONTHLY", dueDate: next(11), notes: "Invoices of the previous month. Quarterly (QRMP) if eligible." },
+      { name: "GSTR-3B (summary return and GST payment)", category: "GST", authority: "GST portal", frequency: "MONTHLY", dueDate: next(20) },
+      { name: "LUT renewal (export of services without IGST)", category: "GST", authority: "GST portal", frequency: "YEARLY", dueDate: nextOf([3], 31), notes: "File the LUT for the next financial year before 1 April.", remindDays: 21 },
+      { name: "GSTR-9 annual return", category: "GST", authority: "GST portal", frequency: "YEARLY", dueDate: nextOf([12], 31), notes: "If applicable for the turnover." },
+      { name: "TDS / TCS payment (challan 281)", category: "TDS", authority: "Income Tax", frequency: "MONTHLY", dueDate: next(7), notes: "TDS withheld last month on salaries and contractors (see the pay run)." },
+      { name: "TDS return 24Q / 26Q", category: "TDS", authority: "TRACES / Income Tax", frequency: "QUARTERLY", dueDate: nextOf([7, 10, 1, 5], 31), notes: "Quarterly; Q4 due 31 May." },
+      { name: "Form 16 / 16A to employees and contractors", category: "TDS", authority: "TRACES", frequency: "YEARLY", dueDate: nextOf([6], 15) },
+      { name: "Advance tax instalment", category: "INCOME_TAX", authority: "Income Tax", frequency: "QUARTERLY", dueDate: nextOf([6, 9, 12, 3], 15), notes: "15 Jun, 15 Sep, 15 Dec, 15 Mar." },
+      { name: "Income tax return (ITR-6) and tax audit if applicable", category: "INCOME_TAX", authority: "Income Tax", frequency: "YEARLY", dueDate: nextOf([10], 31), remindDays: 30 },
+      { name: "Statutory audit of financial statements", category: "MCA", authority: "Auditor", frequency: "YEARLY", dueDate: nextOf([9], 30), remindDays: 30 },
+      { name: "Annual general meeting (AGM)", category: "BOARD", authority: "Companies Act", frequency: "YEARLY", dueDate: nextOf([9], 30), remindDays: 30 },
+      { name: "AOC-4 (financial statements to ROC)", category: "MCA", authority: "MCA portal", frequency: "YEARLY", dueDate: nextOf([10], 29), notes: "Within 30 days of the AGM." },
+      { name: "MGT-7 / MGT-7A (annual return)", category: "MCA", authority: "MCA portal", frequency: "YEARLY", dueDate: nextOf([11], 28), notes: "Within 60 days of the AGM." },
+      { name: "DIR-3 KYC for each director", category: "MCA", authority: "MCA portal", frequency: "YEARLY", dueDate: nextOf([9], 30) },
+      { name: "ADT-1 (auditor appointment)", category: "MCA", authority: "MCA portal", frequency: "ONE_OFF", dueDate: nextOf([10], 14), notes: "Within 15 days of the AGM where the auditor is appointed." },
+      { name: "Board meeting (at least one per quarter)", category: "BOARD", authority: "Companies Act", frequency: "QUARTERLY", dueDate: nextOf([6, 9, 12, 3], 30), notes: "Gap between two meetings must not exceed 120 days. Record decisions in the register." },
+      { name: "PF and ESI contributions", category: "PAYROLL", authority: "EPFO / ESIC", frequency: "MONTHLY", dueDate: next(15), notes: "Once registered (20+ employees for PF, 10+ for ESI)." },
+      { name: "Professional tax (state)", category: "PAYROLL", authority: "State", frequency: "MONTHLY", dueDate: next(15), notes: "If your state levies it; check the due date with the CA." },
+      { name: "Business insurance review (professional indemnity, cyber)", category: "INSURANCE", authority: "Insurer", frequency: "YEARLY", dueDate: nextOf([3], 31), remindDays: 30 },
+    ];
+    for (const it of items) await prisma.complianceItem.create({ data: { remindDays: 7, ...it, notes: it.notes ?? null } });
+  }
 
   // Sample client + project = the md "Sample Monthly Retainer (160 hrs)"
   if ((await prisma.project.count()) === 0 && (await prisma.client.count()) === 0) {
@@ -267,7 +325,8 @@ async function main() {
     });
   }
 
-  console.log(`Seed complete. Admin login: ${email} / ${password}`);
+  console.log(`Seed complete. Owner login: ${email} / ${password}`);
+  if (process.env.NODE_ENV !== "production") for (const [role, , userEmail, userPassword] of roleUsers) console.log(`  ${role}: ${userEmail} / ${userPassword}`);
 }
 
 main()

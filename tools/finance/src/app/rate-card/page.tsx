@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { PageHeader, StatusBadge } from "@genclover/ui";
-import { requireUser } from "@genclover/auth";
+import { can, requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { getBuckets, getParams } from "../../lib/settings";
 import { roleMetrics, split } from "../../lib/calc";
 import { num, pct, usd, usd0 } from "@genclover/ui/format";
 
-/** The 65 / 10 / 25 model: each fund's share is in "Allocation per $100" below the table. */
+/** The allocation model: each fund's share is in "Allocation per $100" below the table. */
 const CATEGORIES = [
   ["delivery", "Delivery"],
   ["growth", "Growth"],
@@ -15,10 +15,11 @@ const CATEGORIES = [
 
 export default async function RateCardPage() {
   const user = await requireUser();
+  const internal = can(user.role, "cost.view");
   const [roles, p, buckets] = await Promise.all([
     prisma.roleRate.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
     getParams(),
-    getBuckets(),
+    internal ? getBuckets() : Promise.resolve([]),
   ]);
 
   return (
@@ -26,7 +27,7 @@ export default async function RateCardPage() {
       <PageHeader
         title="Client Rate Card"
         subtitle={`7+ years experience · India → USA · FX ₹${p.fxRate}/$ · ${p.billableHoursPerYear} billable hrs/yr · US load ×${p.usLoadFactor}`}
-        actions={user.role === "ADMIN" && <Link href="/admin/rate-card" className="btn-primary">Edit rate card</Link>}
+        actions={can(user.role, "finance.settings") && <Link href="/admin/rate-card" className="btn-primary">Edit rate card</Link>}
       />
 
       <div className="card overflow-x-auto">
@@ -40,15 +41,15 @@ export default async function RateCardPage() {
               <th className="num">GC Standard</th>
               <th className="num">Floor</th>
               <th className="num">Premium</th>
-              {CATEGORIES.map(([key, label]) => (
+              {internal && CATEGORIES.map(([key, label]) => (
                 <th key={key} className="num" title={`${label} share of the Standard rate, per hour`}>
                   {label} {Math.round(split(100, buckets)[key])}%
                 </th>
               ))}
               <th className="num">Savings vs US</th>
               <th className="num">Mkt Position</th>
-              <th className="num">Coverage</th>
-              <th>Status</th>
+              {internal && <th className="num">Coverage</th>}
+              {internal && <th>Status</th>}
             </tr>
           </thead>
           <tbody>
@@ -67,13 +68,13 @@ export default async function RateCardPage() {
                   <td className="num font-semibold text-brand-fg">{usd(r.standardRate)}</td>
                   <td className="num">{usd(m.floor)}</td>
                   <td className="num">{m.premium.min === m.premium.max ? `$${m.premium.min}` : `$${m.premium.min}–${m.premium.max}`}</td>
-                  {CATEGORIES.map(([key]) => (
+                  {internal && CATEGORIES.map(([key]) => (
                     <td key={key} className="num text-neutral-600">{usd(s[key])}</td>
                   ))}
                   <td className="num">~{pct(m.savings)}</td>
                   <td className="num">{pct(m.position)}</td>
-                  <td className="num">{m.coverage == null ? "—" : `${num(m.coverage, 2)}×`}</td>
-                  <td><StatusBadge status={m.status} /></td>
+                  {internal && <td className="num">{m.coverage == null ? "—" : `${num(m.coverage, 2)}×`}</td>}
+                  {internal && <td><StatusBadge status={m.status} /></td>}
                 </tr>
               );
             })}
@@ -95,9 +96,10 @@ export default async function RateCardPage() {
           <ul className="space-y-1 text-sm">
             <li>Floor = Standard − ${p.floorDeltaLow} (below ${p.floorThreshold}) / − ${p.floorDeltaHigh} (at/above)</li>
             <li>Premium = Standard + {p.premiumPctMin}–{p.premiumPctMax}%, rounded to ${p.rateRounding}</li>
-            <li>Coverage target ≥ {p.coverageTarget}× India CTC midpoint</li>
+            {internal && <li>Coverage target ≥ {p.coverageTarget}× India CTC midpoint</li>}
           </ul>
         </div>
+        {internal && (
         <div className="card p-5">
           <div className="card-t mb-2">Allocation per $100</div>
           <ul className="space-y-1 text-sm">
@@ -109,9 +111,10 @@ export default async function RateCardPage() {
             ))}
           </ul>
         </div>
+        )}
       </div>
       <p className="mt-4 text-xs text-neutral-500">
-        Internal document. Never disclose the allocation split to clients; quote Standard, blended or retainer pricing.
+        {internal ? "Internal document. Never disclose the allocation split to clients; quote Standard, blended or retainer pricing." : "Quote Standard, blended or retainer pricing. Never go below the floor without an owner's approval."}
       </p>
     </>
   );

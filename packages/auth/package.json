@@ -5,7 +5,8 @@
   "description": "Portal login sessions and role checks shared by every tool",
   "exports": {
     ".": "./src/server.ts",
-    "./session": "./src/session.ts"
+    "./session": "./src/session.ts",
+    "./access": "./src/access.ts"
   },
   "dependencies": {
     "@genclover/db": "*",

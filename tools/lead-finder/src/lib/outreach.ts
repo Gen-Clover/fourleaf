@@ -2,16 +2,21 @@
 // follow-ups, replies found in the inbox), so the lead's stage and follow-up date move the same way.
 import { prisma } from "@genclover/db";
 import { ENGAGED_STAGES, SEQUENCE_DAYS } from "./services";
+import { type By, changeStage } from "./stages";
 
-export const OUTREACH_TYPES = ["WHATSAPP", "EMAIL", "CALL", "VISIT"];
-type By = { id: string | null; name: string };
+export const OUTREACH_TYPES = ["WHATSAPP", "EMAIL", "LINKEDIN", "CALL", "VISIT"];
 
 /** The next message in the sequence for this lead: 0 = first, 1–3 = follow-ups, null = sequence done. */
 export const nextStep = (lead: { contactCount: number }) => (lead.contactCount < SEQUENCE_DAYS.length ? lead.contactCount : null);
 
+/** They've written and we haven't answered since (the 1-hour reply target runs from lastReplyAt). */
+export const awaitingOurReply = (lead: { lastReplyAt: Date | null; respondedAt: Date | null }) =>
+  !!lead.lastReplyAt && (!lead.respondedAt || lead.respondedAt < lead.lastReplyAt);
+
 /**
  * A message went out (WhatsApp, email, call or visit). Moves New/Qualified to Contacted and sets the next
  * follow-up: day 1, 3 and 7 after the first message; after the last one, no more follow-ups.
+ * After a reply, it counts as our answer (stops the 1-hour timer) and follow-ups are set by hand.
  */
 export async function recordOutreach(leadId: string, o: { channel: string; text: string; service?: string | null; by: By }) {
   const lead = await prisma.lead.findUniqueOrThrow({ where: { id: leadId } });
@@ -22,19 +27,17 @@ export async function recordOutreach(leadId: string, o: { channel: string; text:
   const engaged = ENGAGED_STAGES.includes(lead.stage);
   const nextDay = SEQUENCE_DAYS[count];
   await prisma.leadActivity.create({ data: { leadId, type: o.channel, text: o.text, service: o.service ?? null, step: lead.contactCount, byId: o.by.id, byName: o.by.name } });
-  await prisma.lead.update({
-    where: { id: leadId },
-    data: {
-      contactCount: count,
-      lastContactAt: now,
-      firstContactAt: first,
-      firstService: lead.firstService ?? o.service ?? null,
-      lastChannel: o.channel,
-      stage: ["NEW", "QUALIFIED"].includes(lead.stage) ? "CONTACTED" : lead.stage,
-      // Once they've replied, follow-ups are set by hand on the lead page.
-      nextFollowUpAt: engaged ? lead.nextFollowUpAt : nextDay != null ? new Date(first.getTime() + nextDay * 86_400_000) : null,
-    },
-  });
+  const data = {
+    contactCount: count,
+    lastContactAt: now,
+    firstContactAt: first,
+    firstService: lead.firstService ?? o.service ?? null,
+    lastChannel: o.channel,
+    ...(awaitingOurReply(lead) ? { respondedAt: now } : {}),
+    nextFollowUpAt: engaged ? lead.nextFollowUpAt : nextDay != null ? new Date(first.getTime() + nextDay * 86_400_000) : null,
+  };
+  if (["NEW", "QUALIFIED"].includes(lead.stage)) await changeStage(leadId, "CONTACTED", { by: o.by, data });
+  else await prisma.lead.update({ where: { id: leadId }, data });
 }
 
 /**
@@ -53,24 +56,27 @@ export async function undoActivity(activityId: string, by: By) {
   const lead = await prisma.lead.findUniqueOrThrow({ where: { id: act.leadId } });
   const rest = await prisma.leadActivity.findMany({ where: { leadId: act.leadId, type: { in: [...OUTREACH_TYPES, "REPLY"] } }, orderBy: { at: "asc" } });
   const sends = rest.filter((a) => a.type !== "REPLY");
-  const reply = rest.find((a) => a.type === "REPLY");
+  const replies = rest.filter((a) => a.type === "REPLY");
   const first = sends[0];
   const last = sends.at(-1);
   const count = sends.length;
   let stage = lead.stage;
-  if (!reply && stage === "REPLIED") stage = count ? "CONTACTED" : "QUALIFIED";
+  if (!replies.length && stage === "REPLIED") stage = count ? "CONTACTED" : "QUALIFIED";
   if (!count && stage === "CONTACTED") stage = "QUALIFIED";
   const nextDay = SEQUENCE_DAYS[count];
-  await prisma.lead.update({
-    where: { id: act.leadId },
+  const lastReplyAt = replies.at(-1)?.at ?? null;
+  await changeStage(act.leadId, stage, {
+    by,
+    reason: "undo",
     data: {
       contactCount: count,
       firstContactAt: first?.at ?? null,
       lastContactAt: last?.at ?? null,
       lastChannel: last?.type ?? null,
       firstService: first?.service ?? null,
-      repliedAt: reply?.at ?? null,
-      stage,
+      repliedAt: replies[0]?.at ?? null,
+      lastReplyAt,
+      respondedAt: lastReplyAt ? (sends.filter((s) => s.at > lastReplyAt).at(-1)?.at ?? null) : null,
       nextFollowUpAt: ENGAGED_STAGES.includes(stage) ? lead.nextFollowUpAt : first && nextDay != null ? new Date(first.at.getTime() + nextDay * 86_400_000) : null,
     },
   });
@@ -79,17 +85,15 @@ export async function undoActivity(activityId: string, by: By) {
   });
 }
 
-/** They replied: the sequence stops and the lead shows up today to be handled. */
+/**
+ * They replied: the follow-up sequence stops, the 1-hour reply timer starts, and the lead shows up
+ * at the top of Today until someone sorts the reply and answers.
+ */
 export async function markReplied(leadId: string, o: { text: string; by: By }) {
   const lead = await prisma.lead.findUniqueOrThrow({ where: { id: leadId } });
+  const now = new Date();
   await prisma.leadActivity.create({ data: { leadId, type: "REPLY", text: o.text, byId: o.by.id, byName: o.by.name } });
-  await prisma.lead.update({
-    where: { id: leadId },
-    data: {
-      repliedAt: lead.repliedAt ?? new Date(),
-      stage: ["NEW", "QUALIFIED", "CONTACTED", "LOST"].includes(lead.stage) ? "REPLIED" : lead.stage,
-      lostReason: null,
-      nextFollowUpAt: new Date(),
-    },
-  });
+  const data = { repliedAt: lead.repliedAt ?? now, lastReplyAt: now, lostReason: null, replyCategory: null, nextFollowUpAt: now };
+  const reopen = ["NEW", "QUALIFIED", "CONTACTED", "LOST", "SNOOZED"].includes(lead.stage);
+  await changeStage(leadId, reopen ? "REPLIED" : lead.stage, { by: o.by, reason: reopen ? "they replied" : null, data });
 }

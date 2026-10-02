@@ -41,22 +41,22 @@ export default function MonthEditor({
     start(async () => {
       const res = await saveMonth(projectId, { ...m, notes: m.notes || null }, isNew ? undefined : initial.month);
       setMsg(res ?? null);
-      if (res?.ok) router.push(`/projects/${projectId}?tab=monthly`);
+      if (res?.ok) router.push(`/finance/projects/${projectId}?tab=monthly`);
     });
 
   const loadTimesheets = () =>
     start(async () => {
       const res = await timesheetMonthLines(projectId, m.month);
-      if (!res.total) return setMsg({ ok: false, message: `No billable timesheet hours logged for ${m.month}.` });
+      if (!res.total) return setMsg({ ok: false, message: `No approved billable hours for ${m.month}${res.pendingEntries ? ` (${res.pendingEntries} entries are in weeks not approved yet)` : ""}.` });
       setM({ ...m, lines: res.lines });
-      setMsg({ ok: true, message: `Loaded ${res.total} billable hrs from timesheets. Review, then save.` });
+      setMsg({ ok: true, message: `Loaded ${res.total} billed hrs from approved timesheets${res.pendingEntries ? ` (${res.pendingEntries} entries in unapproved weeks left out)` : ""}. Review, then save.` });
     });
 
   return (
     <div className="card">
       <div className="card-h">
         <div className="card-t">{isNew ? "Add month" : `${locked ? "View" : "Edit"} ${initial.month}`} · {MODELS[agreement.engagementModel]}</div>
-        <Link href={`/projects/${projectId}?tab=monthly`} className="text-sm text-neutral-500 hover:underline">Close</Link>
+        <Link href={`/finance/projects/${projectId}?tab=monthly`} className="text-sm text-neutral-500 hover:underline">Close</Link>
       </div>
       {invoice && (
         <div className="border-b border-neutral-200 bg-blue-50 px-5 py-2 text-sm text-blue-800">

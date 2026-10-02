@@ -1,11 +1,11 @@
 import { PageHeader } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { getBuckets, getParams } from "../../../lib/settings";
 import RateCardEditor from "./RateCardEditor";
 
 export default async function AdminRateCardPage() {
-  await requireRole("ADMIN");
+  await requirePermission("finance.settings");
   const [roles, params, buckets] = await Promise.all([prisma.roleRate.findMany({ orderBy: { sortOrder: "asc" } }), getParams(), getBuckets()]);
   const initial = roles.map((r) => ({
     id: r.id,

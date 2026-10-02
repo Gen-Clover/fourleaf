@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "@genclover/db": "*",
-    "@genclover/lead-finder": "*"
+    "@genclover/lead-finder": "*",
+    "@genclover/governance": "*"
   },
   "devDependencies": {
     "tsx": "^4.23.15"

@@ -1,16 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+
 import { COMMITMENT_KINDS, FREQUENCIES } from "@genclover/ui/format";
 import { saveCommitment } from "./actions";
+import { useFormAction } from "@genclover/ui/form-action";
 
 export type CommitmentDto = { id: string; name: string; kind: string; fundKey: string; amountInr: number; frequency: string; nextDueDate: string; endDate: string | null; essential: boolean; active: boolean; notes: string | null };
 
 export default function CommitmentForm({ c, funds, today }: { c: CommitmentDto | null; funds: { key: string; name: string }[]; today: string }) {
-  const [state, action, pending] = useActionState(saveCommitment.bind(null, c?.id ?? null), undefined);
+  const { state, pending, form } = useFormAction(saveCommitment.bind(null, c?.id ?? null), { resetOnSuccess: !c?.id });
   return (
-    <form action={action} className="card space-y-4 p-5">
+    <form {...form} className="card space-y-4 p-5">
       <div className="flex items-center justify-between">
         <div className="card-t">{c ? `Edit: ${c.name}` : "Add commitment"}</div>
         {c && <Link href="/commitments" className="text-sm text-neutral-500 hover:underline">Cancel</Link>}

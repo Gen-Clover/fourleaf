@@ -12,6 +12,7 @@
     "generate": "prisma generate",
     "push": "prisma db push --skip-generate && tsx --env-file-if-exists=../../.env scripts/after-push.ts",
     "seed": "prisma db seed",
+    "allocation": "tsx --env-file-if-exists=../../.env scripts/allocation-oct-2026.ts",
     "migrate:sqlite": "tsx --env-file-if-exists=../../.env scripts/migrate-from-sqlite.ts",
     "postinstall": "prisma generate",
     "local": "tsx scripts/local-mongo.ts"

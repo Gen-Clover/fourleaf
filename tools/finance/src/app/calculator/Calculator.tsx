@@ -10,7 +10,21 @@ export type CalcRole = { id: string; name: string; standard: number; floor: numb
 type L = { roleId: string; headcount: number; hoursPerMonth: number; tier: string; quotedRate: number };
 type Pkg = { blendedRate: number; retainerAmount: number; retainerHours: number; additionalHourRate: number };
 
-export default function Calculator({ roles, buckets, pkg, clients, canSave }: { roles: CalcRole[]; buckets: Bucket[]; pkg: Pkg; clients: { id: string; code: string; name: string }[]; canSave: boolean }) {
+export default function Calculator({
+  roles,
+  buckets,
+  pkg,
+  clients,
+  canSave,
+  showAllocation,
+}: {
+  roles: CalcRole[];
+  buckets: Bucket[];
+  pkg: Pkg;
+  clients: { id: string; code: string; name: string }[];
+  canSave: boolean;
+  showAllocation: boolean;
+}) {
   const router = useRouter();
   const byId = new Map(roles.map((r) => [r.id, r]));
   const rateFor = (roleId: string, tier: string, current = 0) => {
@@ -42,8 +56,8 @@ export default function Calculator({ roles, buckets, pkg, clients, canSave }: { 
       <div className="card">
         <div className="card-h">
           <div className="card-t">Resources</div>
-          <div className="flex items-center gap-2">
-            <select className="input-sm" value="" onChange={(e) => add(e.target.value)}>
+          <div className="flex min-w-0 max-w-full items-center gap-2">
+            <select className="input-sm max-w-full min-w-0" value="" onChange={(e) => add(e.target.value)}>
               <option value="">+ Add role…</option>
               {roles.map((r) => <option key={r.id} value={r.id}>{r.name} (${r.standard})</option>)}
             </select>
@@ -108,12 +122,14 @@ export default function Calculator({ roles, buckets, pkg, clients, canSave }: { 
             <div className="flex justify-between font-medium"><dt>Client savings vs US</dt><dd className="text-emerald-700">{us ? pct(1 - rev / us) : "—"}</dd></div>
           </dl>
         </div>
+        {showAllocation && (
         <div className="card p-5">
           <div className="card-t mb-3">Internal allocation</div>
           <dl className="space-y-1 text-sm">
             {s.lines.map((l) => <div key={l.key} className="flex justify-between"><dt className="text-neutral-600">{l.name} ({l.percent}%)</dt><dd className="tabular-nums">{usd(l.amount)}</dd></div>)}
           </dl>
         </div>
+        )}
       </div>
 
       {canSave && lines.length > 0 && (
@@ -133,7 +149,7 @@ export default function Calculator({ roles, buckets, pkg, clients, canSave }: { 
               start(async () => {
                 const res = await createProjectFromCalculator({ ...save, engagementModel: model, lines });
                 setMsg(res ?? null);
-                if (res?.ok && res.id) router.push(`/projects/${res.id}?tab=pricing`);
+                if (res?.ok && res.id) router.push(`/finance/projects/${res.id}?tab=pricing`);
               })
             }
           >

@@ -4,8 +4,8 @@ import { SignJWT, jwtVerify } from "jose";
 export const SESSION_COOKIE = "gc_session";
 export const SESSION_MAX_AGE = 60 * 60 * 12; // 12 hours
 
-export type Role = "ADMIN" | "EDITOR" | "VIEWER";
-export type SessionPayload = { sub: string; name: string; email: string; role: Role };
+/** role: one of ROLES in access.ts (older sessions may carry ADMIN / EDITOR / VIEWER; see normalizeRole). */
+export type SessionPayload = { sub: string; name: string; email: string; role: string };
 
 function secret() {
   const s = process.env.AUTH_SECRET;

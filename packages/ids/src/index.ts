@@ -74,3 +74,51 @@ export const invoiceCounter = (prefix: string, fy: string) => `invoice:${prefix}
 export async function nextInvoiceNumber(db: Db, prefix: string, fy: string) {
   return `${prefix}/${fy}/${pad(await nextNumber(db, invoiceCounter(prefix, fy)), 4)}`;
 }
+
+// ---------- Added with Clients & Agreements, Delivery, People and Governance ----------
+//
+//   Opportunity   GO-2026-0001        year created (IST)
+//   Agreement     ABR-A01             client-level: NDA, MSA, SLA, DPA…
+//   SOW           ABR-P01-S01         per project
+//   Change req.   ABR-P01-CR01        per project
+//   Acceptance    ABR-P01-AC01        per project
+//   Employee      GCE-0001            Contractor GCT-0001
+//   Work order    GCT-0001-W01        per contractor
+//   Issue         ISS-2026-0001       Decision DEC-2026-001
+//   Pay run       PR-2026-10          one per month
+
+export async function nextOpportunityCode(db: Db, at = new Date()) {
+  const { year } = ist(at);
+  return `GO-${year}-${pad(await nextNumber(db, `opportunity:${year}`), 4)}`;
+}
+
+export async function nextAgreementCode(db: Db, client: { id: string; code: string }) {
+  return `${client.code}-A${pad(await nextNumber(db, `agreement:${client.id}`), 2)}`;
+}
+
+/** Project documents: S = statement of work, CR = change request, AC = acceptance certificate. */
+export type ProjectDocKind = "S" | "CR" | "AC";
+export async function nextProjectDocCode(db: Db, project: { id: string; code: string }, kind: ProjectDocKind) {
+  return `${project.code}-${kind}${pad(await nextNumber(db, `projectdoc:${kind}:${project.id}`), 2)}`;
+}
+
+export async function nextPersonCode(db: Db, type: "EMPLOYEE" | "CONTRACTOR") {
+  return `${type === "EMPLOYEE" ? "GCE" : "GCT"}-${pad(await nextNumber(db, `person:${type}`), 4)}`;
+}
+
+export async function nextWorkOrderCode(db: Db, person: { id: string; code: string }) {
+  return `${person.code}-W${pad(await nextNumber(db, `workorder:${person.id}`), 2)}`;
+}
+
+export async function nextIssueCode(db: Db, at = new Date()) {
+  const { year } = ist(at);
+  return `ISS-${year}-${pad(await nextNumber(db, `issue:${year}`), 4)}`;
+}
+
+export async function nextDecisionCode(db: Db, at = new Date()) {
+  const { year } = ist(at);
+  return `DEC-${year}-${pad(await nextNumber(db, `decision:${year}`), 3)}`;
+}
+
+/** PR-2026-10 for October 2026 (month = "2026-10"). */
+export const payRunCode = (month: string) => `PR-${month}`;

@@ -38,6 +38,19 @@ async function footer() {
   return `\n\n--\n${name}${address ? ` · ${address}` : ""}\nIf you'd rather not hear from us, reply "unsubscribe" and we won't email you again.`;
 }
 
+/** An internal notice to a team member (task assigned, meeting reminder). Not outreach: no footer, not counted. */
+export async function sendSystemEmail(to: string, subject: string, text: string, attachment?: { filename: string; content: string }) {
+  if (!emailConfigured()) return false;
+  await transporter().sendMail({
+    from: process.env.EMAIL_FROM,
+    to,
+    subject,
+    text,
+    attachments: attachment ? [{ filename: attachment.filename, content: attachment.content, contentType: "text/calendar; charset=utf-8" }] : undefined,
+  });
+  return true;
+}
+
 export type SendInput = { subject: string; text: string; service?: string | null; by: { id: string | null; name: string }; auto?: boolean };
 
 /** Send one email to the lead and record it (timeline, follow-up dates). Throws with a readable reason. */

@@ -3,16 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@genclover/db";
-import { assertRole } from "@genclover/auth";
+import { assertPermission } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
 import { type Result, fail } from "@genclover/ui/result";
+import { getBuckets } from "../../../lib/settings";
+import { activePolicyName, allocationFor } from "../../../lib/treasury";
 
 type Alloc = { key: string; percent: number };
 
 /** Make a policy the live allocation: writes its % onto the allocation buckets (funds). Funds it doesn't list go to 0%. */
 export async function activatePolicy(id: string): Promise<Result> {
   try {
-    const user = await assertRole("ADMIN");
+    const user = await assertPermission("finance.settings");
     const policy = await prisma.financialPolicy.findUniqueOrThrow({ where: { id } });
     const allocs = JSON.parse(policy.allocations) as Alloc[];
     const total = allocs.reduce((s, a) => s + a.percent, 0);
@@ -33,6 +35,37 @@ export async function activatePolicy(id: string): Promise<Result> {
   }
 }
 
+/**
+ * Bring existing records onto the live allocation: every project's allocation snapshot (its budgets and
+ * commercials), and the fund split of every receipt already recorded (re-split as recordPayment would today).
+ * Fund transfers, withdrawals and spends are not touched.
+ */
+export async function reapplyAllocation(): Promise<Result> {
+  try {
+    const user = await assertPermission("finance.settings");
+    const [buckets, policy] = await Promise.all([getBuckets(), activePolicyName()]);
+    const projects = await prisma.project.updateMany({ data: { allocationSnapshot: JSON.stringify(buckets) } });
+    const payments = await prisma.payment.findMany({
+      where: { fundEntries: { some: { type: "ALLOCATION" } } },
+      include: { invoice: { select: { number: true, total: true, taxAmount: true, lines: { select: { kind: true, amount: true } } } } },
+    });
+    for (const pay of payments) {
+      const alloc = await allocationFor(pay.inrReceived, pay.invoice);
+      await prisma.$transaction([
+        prisma.fundEntry.deleteMany({ where: { paymentId: pay.id, type: "ALLOCATION" } }),
+        prisma.fundEntry.createMany({
+          data: alloc.lines.map((l) => ({ date: pay.date, fundKey: l.key, amountInr: l.amount, type: "ALLOCATION", paymentId: pay.id, policy: alloc.policy, note: `${pay.invoice.number} receipt (re-split)`, createdBy: user.name })),
+        }),
+      ]);
+    }
+    await audit(user, "UPDATE", "Allocation", null, `"${policy}" applied to ${projects.count} project(s) and ${payments.length} receipt(s)`);
+    revalidatePath("/", "layout");
+    return { ok: true, message: `"${policy}" applied to ${projects.count} project(s) and ${payments.length} receipt(s).` };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 const SaveAs = z.object({
   name: z.string().trim().min(1, "Name the policy"),
   stage: z.enum(["STARTUP", "GROWTH", "MATURE", "CUSTOM"]),
@@ -42,7 +75,7 @@ const SaveAs = z.object({
 /** Save the current allocation buckets as a named policy (creates it, or overwrites one with the same name). */
 export async function saveCurrentAsPolicy(input: unknown): Promise<Result> {
   try {
-    const user = await assertRole("ADMIN");
+    const user = await assertPermission("finance.settings");
     const d = SaveAs.parse(input);
     const buckets = await prisma.allocationBucket.findMany({ orderBy: { sortOrder: "asc" } });
     const allocations = JSON.stringify(buckets.map((b) => ({ key: b.key, percent: b.percent })));
@@ -56,7 +89,7 @@ export async function saveCurrentAsPolicy(input: unknown): Promise<Result> {
 }
 
 export async function deletePolicy(id: string) {
-  const user = await assertRole("ADMIN");
+  const user = await assertPermission("finance.settings");
   const p = await prisma.financialPolicy.findUniqueOrThrow({ where: { id } });
   if (p.active) throw new Error("Activate another policy first");
   await prisma.financialPolicy.delete({ where: { id } });

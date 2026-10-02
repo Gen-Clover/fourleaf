@@ -35,8 +35,8 @@ model RoleRate {
 }
 
 /// status: DRAFT | QUOTED | NEGOTIATION | ACTIVE | ON_HOLD | COMPLETED | CANCELLED
-/// engagementModel: TM | RETAINER | BLENDED | FIXED
-/// kind: PROJECT | CARE (a care plan after go-live is its own project, usually a retainer)
+/// engagementModel: TM | RETAINER | BLENDED | FIXED (monthly fee) | FIXED_PRICE (one price, billed by milestones)
+/// kind: PROJECT | CARE (support after go-live) | PRODUCT (Gen Clover's own product) | INTERNAL (bench, R&D, admin)
 model Project {
   id                 String            @id @default(cuid()) @map("_id")
   code               String            @unique // <client code>-P01, e.g. ABR-P01 (packages/ids)
@@ -46,6 +46,9 @@ model Project {
   client             Client            @relation(fields: [clientId], references: [id])
   status             String            @default("DRAFT")
   engagementModel    String            @default("TM")
+  currency           String            @default("USD") // client billing currency: USD | INR
+  opportunityId      String?
+  deliveryManager    String?
   startDate          DateTime?
   endDate            DateTime?
   description        String?
@@ -72,6 +75,10 @@ model Project {
   timeEntries        TimeEntry[]
   expenses           Expense[]
   invoices           Invoice[]
+  agreements         Agreement[]
+  workOrders         WorkOrder[]
+  resourceRequests   ResourceRequest[]
+  issues             Issue[]
 
   @@index([clientId])
 }
@@ -133,28 +140,45 @@ model MonthlyLine {
 }
 
 /// type: EMPLOYEE | CONTRACTOR · costBasis: MONTHLY (₹ per month, e.g. CTC ÷ 12) | HOURLY (₹ per hour)
+/// payModel: SALARY (employee, monthly) | HOURLY (approved hours × rate) | RETAINER (fixed monthly fee for
+/// capacity) | FIXED_FEE (paid per work order). costInr = monthly salary / retainer, or the hourly rate.
 model Person {
-  id               String       @id @default(cuid()) @map("_id")
+  id               String           @id @default(cuid()) @map("_id")
+  code             String? // GCE-0001 employee, GCT-0001 contractor (unique when set: scripts/after-push.ts)
   name             String
   email            String?
+  phone            String?
   title            String?
-  type             String       @default("EMPLOYEE")
+  department       String?
+  managerName      String?
+  type             String           @default("EMPLOYEE")
+  payModel         String           @default("SALARY")
+  pan              String?
+  gstin            String?
+  gstRegistered    Boolean          @default(false) // contractor charges GST on their invoice
+  tdsRatePct       Float? // TDS deducted on contractor payments (e.g. 10 for 194J); null = settings default
+  onboarding       String? // JSON checklist { key: true }
+  offboarding      String?
   roleId           String?
-  role             RoleRate?    @relation(fields: [roleId], references: [id])
-  costBasis        String       @default("MONTHLY")
-  costInr          Float        @default(0)
-  stdHoursPerMonth Float        @default(160)
+  role             RoleRate?        @relation(fields: [roleId], references: [id])
+  costBasis        String           @default("MONTHLY")
+  costInr          Float            @default(0)
+  stdHoursPerMonth Float            @default(160)
   startDate        DateTime?
   endDate          DateTime?
   nextReviewDate   DateTime? // salary review / hike due
-  active           Boolean      @default(true)
+  active           Boolean          @default(true)
   notes            String?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
   assignments      Assignment[]
   timeEntries      TimeEntry[]
   milestones       Milestone[]
   expenses         Expense[]
+  documents        PersonDocument[]
+  workOrders       WorkOrder[]
+  timesheetWeeks   TimesheetWeek[]
+  payLines         PayLine[]
 }
 
 /// A person staffed on a project, optionally against one resource line of the quote.
@@ -168,6 +192,12 @@ model Assignment {
   resource      ProjectResource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
   hoursPerMonth Float            @default(0)
   billable      Boolean          @default(true)
+  // What the client is billed for this person's time (finance only): ACTUAL = hours worked;
+  // PER_DAY = billValue hours for every day worked (e.g. 8); FACTOR = hours worked × billValue.
+  billMode      String           @default("ACTUAL")
+  billValue     Float            @default(1)
+  startDate     DateTime?
+  endDate       DateTime?
 
   @@unique([projectId, personId])
   @@index([personId])
@@ -175,17 +205,22 @@ model Assignment {
 
 /// status: PLANNED | IN_PROGRESS | DONE | BLOCKED
 model Milestone {
-  id          String    @id @default(cuid()) @map("_id")
-  projectId   String
-  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  title       String
-  notes       String?
-  ownerId     String?
-  owner       Person?   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  dueDate     DateTime?
-  status      String    @default("PLANNED")
-  completedAt DateTime?
-  sortOrder   Int       @default(0)
+  id            String    @id @default(cuid()) @map("_id")
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title         String
+  notes         String?
+  ownerId       String?
+  owner         Person?   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  dueDate       DateTime?
+  status        String    @default("PLANNED")
+  completedAt   DateTime?
+  // Fixed-price billing (finance only): the amount billed when the milestone is delivered
+  billingAmount Float?
+  invoiceId     String?
+  acceptedAt    DateTime?
+  acceptanceRef String? // acceptance certificate code, e.g. ABR-P01-AC01
+  sortOrder     Int       @default(0)
 
   @@index([projectId])
 }
@@ -198,7 +233,8 @@ model TimeEntry {
   projectId   String
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   date        DateTime
-  hours       Float
+  hours       Float // worked: what the person is paid for (hourly people)
+  billedHours Float? // billed to the client (null = hours); from the assignment's billing basis
   billable    Boolean  @default(true)
   costRateInr Float    @default(0)
   createdAt   DateTime @default(now())
@@ -249,30 +285,37 @@ model Expense {
 
 /// status: DRAFT | SENT | PARTIAL | PAID | VOID. fxRate = ₹ per US$ used to book revenue on the issue date.
 model Invoice {
-  id        String          @id @default(cuid()) @map("_id")
-  number    String          @unique
-  clientId  String
-  client    Client          @relation(fields: [clientId], references: [id])
-  projectId String?
-  project   Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  issueDate DateTime
-  dueDate   DateTime
-  currency  String          @default("USD")
-  fxRate    Float
-  status    String          @default("DRAFT")
-  total     Float           @default(0) // computed from lines on save
-  notes     String?
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  lines     InvoiceLine[]
-  payments  Payment[]
-  months    MonthlyRecord[]
+  id            String          @id @default(cuid()) @map("_id")
+  number        String          @unique
+  clientId      String
+  client        Client          @relation(fields: [clientId], references: [id])
+  projectId     String?
+  project       Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  issueDate     DateTime
+  dueDate       DateTime
+  currency      String          @default("USD")
+  fxRate        Float
+  status        String          @default("DRAFT")
+  total         Float           @default(0) // computed from lines on save, including tax
+  // GST. taxType: NONE | EXPORT_LUT (export of services, zero-rated) | IGST (other state) | CGST_SGST (same state)
+  taxType       String          @default("NONE")
+  taxRate       Float           @default(0)
+  subtotal      Float? // before tax (null on old invoices = total)
+  taxAmount     Float           @default(0)
+  placeOfSupply String?
+  sac           String? // services accounting code, e.g. 998314
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  lines         InvoiceLine[]
+  payments      Payment[]
+  months        MonthlyRecord[]
 
   @@index([clientId])
   @@index([projectId])
 }
 
-/// kind: SERVICES | PASS_THROUGH | OTHER
+/// kind: SERVICES | MILESTONE (fixed-price billing; revenue in the issue month) | PASS_THROUGH | OTHER
 model InvoiceLine {
   id          String   @id @default(cuid()) @map("_id")
   invoiceId   String
@@ -298,9 +341,10 @@ model Payment {
   invoiceId      String
   invoice        Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   date           DateTime
-  amountUsd      Float
+  amountUsd      Float // amount settled, in the invoice's currency (US$ or ₹)
   inrReceived    Float
   bankChargesInr Float       @default(0)
+  tdsInr         Float       @default(0) // TDS the client deducted (Indian clients); claimable against our tax
   reference      String?
   createdAt      DateTime    @default(now())
   fundEntries    FundEntry[]
@@ -358,4 +402,52 @@ model FinancialPolicy {
   allocations String
   active      Boolean  @default(false)
   updatedAt   DateTime @updatedAt
+}
+
+/// A month's pay for everyone: PR-2026-10. status: DRAFT | APPROVED | PAID.
+/// Approving writes each line as an expense (payroll or contractor payable); a second person approves.
+model PayRun {
+  id         String    @id @default(cuid()) @map("_id")
+  code       String    @unique
+  month      String // YYYY-MM
+  status     String    @default("DRAFT")
+  totalGross Float     @default(0)
+  totalNet   Float     @default(0)
+  createdBy  String
+  approvedBy String?
+  approvedAt DateTime?
+  paidAt     DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  lines      PayLine[]
+
+  @@index([month])
+}
+
+/// kind: SALARY | HOURLY | RETAINER | FIXED_FEE. breakdown = JSON [{ projectCode, hours, amount }].
+/// gross − tds − otherDeductions + gst = net payable.
+model PayLine {
+  id              String    @id @default(cuid()) @map("_id")
+  payRunId        String
+  payRun          PayRun    @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  personId        String
+  person          Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  kind            String
+  description     String
+  hours           Float     @default(0)
+  rate            Float     @default(0)
+  gross           Float
+  gst             Float     @default(0)
+  tds             Float     @default(0)
+  otherDeductions Float     @default(0)
+  net             Float
+  breakdown       String?
+  workOrderId     String?
+  expenseId       String?
+  paidOn          DateTime?
+  reference       String?
+
+  @@index([payRunId])
+  @@index([personId])
 }

@@ -8,6 +8,7 @@
     "./status-badge": "./src/StatusBadgeClient.tsx",
     "./format": "./src/format.ts",
     "./result": "./src/result.ts",
+    "./form-action": "./src/useFormAction.ts",
     "./theme-toggle": "./src/ThemeToggle.tsx",
     "./brand": "./src/Brand.tsx",
     "./nav": "./src/nav.ts",

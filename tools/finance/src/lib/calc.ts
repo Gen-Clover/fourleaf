@@ -166,6 +166,7 @@ export const MODELS: Record<string, string> = {
   RETAINER: "Monthly Retainer",
   BLENDED: "Blended Rate",
   FIXED: "Fixed Monthly Fee",
+  FIXED_PRICE: "Fixed Price (billed by milestones)",
 };
 
 /** Monthly revenue for a set of worked hours under the agreed engagement model. */

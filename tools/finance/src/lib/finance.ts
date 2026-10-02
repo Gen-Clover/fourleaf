@@ -55,7 +55,11 @@ export const monthlyCostInr = (p: CostLike) => (p.costBasis === "HOURLY" ? p.cos
 // ---------- Invoices & payments ----------
 
 export type LineLike = { quantity: number; unitPrice: number };
-export type PaymentLike = { amountUsd: number; inrReceived: number; bankChargesInr: number };
+/** amountUsd = amount settled in the invoice's currency (US$ or ₹). tdsInr = tax the client deducted (not an FX loss). */
+export type PaymentLike = { amountUsd: number; inrReceived: number; bankChargesInr: number; tdsInr?: number };
+
+/** ₹ per unit of a currency: 1 for rupees, else the given US$ rate. */
+export const fxFor = (currency: string | null | undefined, usdRate: number) => (currency === "INR" ? 1 : usdRate);
 
 export const lineAmount = (l: LineLike) => Math.round(l.quantity * l.unitPrice * 100) / 100;
 export const invoiceTotal = (lines: LineLike[]) => Math.round(lines.reduce((s, l) => s + lineAmount(l), 0) * 100) / 100;
@@ -76,7 +80,7 @@ export const monthStatusFor = (invoiceStatus: string | null | undefined) =>
 /** Realised FX on a receipt: what landed (+ charges the bank kept) vs what was booked at the invoice rate. */
 export function paymentFx(p: PaymentLike, invoiceFx: number) {
   const bookedInr = p.amountUsd * invoiceFx;
-  const grossInr = p.inrReceived + p.bankChargesInr;
+  const grossInr = p.inrReceived + p.bankChargesInr + (p.tdsInr ?? 0);
   return { bookedInr, grossInr, fxGainInr: grossInr - bookedInr, effectiveRate: p.amountUsd > 0 ? grossInr / p.amountUsd : 0 };
 }
 

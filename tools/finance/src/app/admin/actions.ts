@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@genclover/db";
-import { assertRole } from "@genclover/auth";
+import { assertPermission } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
 
 export type ActionResult = { ok: boolean; message: string };
@@ -29,7 +29,7 @@ const RoleRow = z.object({
 
 export async function saveRateCard(rows: unknown): Promise<ActionResult> {
   try {
-    const user = await assertRole("ADMIN");
+    const user = await assertPermission("finance.settings");
     const data = z.array(RoleRow).parse(rows);
     const names = data.map((r) => r.name.toLowerCase());
     if (new Set(names).size !== names.length) throw new Error("Role names must be unique");
@@ -84,7 +84,7 @@ export async function saveRateCard(rows: unknown): Promise<ActionResult> {
 
 export async function saveSettings(values: Record<string, string>): Promise<ActionResult> {
   try {
-    const user = await assertRole("ADMIN");
+    const user = await assertPermission("finance.settings");
     const rows = await prisma.setting.findMany();
     const changes: string[] = [];
     for (const row of rows) {
@@ -116,7 +116,7 @@ const BucketRow = z.object({
 
 export async function saveBuckets(rows: unknown): Promise<ActionResult> {
   try {
-    const user = await assertRole("ADMIN");
+    const user = await assertPermission("finance.settings");
     const data = z.array(BucketRow).parse(rows);
     const total = data.reduce((s, b) => s + b.percent, 0);
     if (Math.abs(total - 100) > 0.001) throw new Error(`Allocation must total 100% (currently ${total}%)`);
@@ -136,6 +136,42 @@ export async function saveBuckets(rows: unknown): Promise<ActionResult> {
     await audit(user, "UPDATE", "Allocation", null, data.map((b) => `${b.name} ${b.percent}%`).join(", "));
     revalidatePath("/", "layout");
     return { ok: true, message: "Allocation model saved. New projects will use it; existing projects keep their snapshot." };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---------- Expense subcategories (what each allocation bucket is actually spent on) ----------
+
+const CategoryRow = z.object({
+  id: z.string().optional(),
+  name: z.string().trim().min(1, "Every subcategory needs a name"),
+  bucketKey: z.string().nullable(),
+  active: z.boolean(),
+});
+
+/** Add, rename, move or retire expense subcategories. They are never deleted: past expenses keep theirs. */
+export async function saveCategories(rows: unknown): Promise<ActionResult> {
+  try {
+    const user = await assertPermission("finance.settings");
+    const data = z.array(CategoryRow).parse(rows);
+    const names = data.map((c) => c.name.toLowerCase());
+    const dup = names.find((n, i) => names.indexOf(n) !== i);
+    if (dup) throw new Error(`"${data[names.indexOf(dup)].name}" is listed twice`);
+    const keys = new Set([...(await prisma.allocationBucket.findMany({ select: { key: true } })).map((b) => b.key), "gst"]);
+    const bad = data.find((c) => c.bucketKey && !keys.has(c.bucketKey));
+    if (bad) throw new Error(`"${bad.name}" points to a bucket that doesn't exist`);
+    await prisma.$transaction(async (tx) => {
+      for (const [i, c] of data.entries()) {
+        const fields = { name: c.name, bucketKey: c.bucketKey, active: c.active, sortOrder: i };
+        if (c.id) await tx.expenseCategory.update({ where: { id: c.id }, data: fields });
+        else await tx.expenseCategory.create({ data: fields });
+      }
+    });
+    await audit(user, "UPDATE", "ExpenseCategory", null, `Subcategories saved (${data.filter((c) => c.active).length} active)`);
+    revalidatePath("/admin/formula");
+    revalidatePath("/expenses");
+    return { ok: true, message: "Subcategories saved." };
   } catch (e) {
     return fail(e);
   }

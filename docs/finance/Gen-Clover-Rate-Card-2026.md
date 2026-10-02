@@ -8,7 +8,9 @@
 
 ## 1. Pricing Formula (Internal)
 
-**Core model:** 65% Delivery + 10% Growth/Talent + 25% Gen Clover Corporate
+> **October 2026:** the live allocation is now the final split (Delivery 40, Growth 7, Corporate Ops 7, Technology 4, Sales 5, Working Capital 9, Survival 5, Ventures 3, BD & Founder Ops 5, Retained Profit 15). The rates below were priced on 65% Delivery; at 40% the delivery-cost check fails for several roles. See the portal's rate card for the live coverage.
+
+**Core model (as priced in September 2026):** 65% Delivery + 10% Growth/Talent + 25% Gen Clover Corporate
 
 | Bucket | % of Client Revenue | What It Covers |
 |---|---|---|

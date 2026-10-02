@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { PageHeader, Stat } from "@genclover/ui";
-import { hasRole, requireUser } from "@genclover/auth";
+import { can, requireUser, roleLabel } from "@genclover/auth";
 import { prisma } from "@genclover/db";
-import { parseSnapshot } from "../../lib/settings";
+import { getParams, parseSnapshot } from "../../lib/settings";
 import { MODELS, plannedMonthly, quoteSummary, split } from "../../lib/calc";
-import { STATUS_LABEL, currentMonth, date, inr, monthLabel, usd0 } from "@genclover/ui/format";
+import { STATUS_LABEL, currentMonth, date, inr, money, monthLabel, usd0 } from "@genclover/ui/format";
 import { monthRange, utcDay, ymd } from "../../lib/finance";
 import { receivables } from "../../lib/ledger";
 import { cfoSnapshot } from "../../lib/treasury";
@@ -14,11 +14,14 @@ import { HBar, RevenueTrend, type TrendRow } from "./DashboardCharts";
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
   const user = await requireUser();
   const { denied } = await searchParams;
-  const [projects, records, clientCount] = await Promise.all([
+  const [projects, records, clientCount, fxParams] = await Promise.all([
     prisma.project.findMany({ include: { client: true, resources: true, months: { select: { month: true } } } }),
-    prisma.monthlyRecord.findMany({ include: { project: { select: { allocationSnapshot: true, clientId: true, client: { select: { name: true } } } } } }),
+    prisma.monthlyRecord.findMany({ include: { project: { select: { allocationSnapshot: true, clientId: true, currency: true, client: { select: { name: true } } } } } }),
     prisma.client.count(),
+    getParams(),
   ]);
+  // This dashboard is in US$: ₹ projects and invoices are converted at the settings rate.
+  const usd = (amount: number, currency: string) => (currency === "INR" ? amount / fxParams.fxRate : amount);
 
   const now = new Date();
   const thisMonth = currentMonth();
@@ -35,7 +38,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     monthRev = 0,
     outstanding = 0;
   const byClient = new Map<string, number>();
-  for (const r of records) {
+  for (const r0 of records) {
+    const r = { ...r0, revenue: usd(r0.revenue, r0.project.currency) };
     const s = split(r.revenue, parseSnapshot(r.project.allocationSnapshot));
     const row = trend.get(r.month);
     if (row) {
@@ -55,12 +59,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   }
 
   const active = projects.filter((p) => p.status === "ACTIVE");
-  const runRate = active.reduce((s, p) => s + plannedMonthly(p, p.resources), 0);
+  const runRate = active.reduce((s, p) => s + usd(plannedMonthly(p, p.resources), p.currency), 0);
   const pipelineStatuses = ["DRAFT", "QUOTED", "NEGOTIATION"];
-  const pipeline = projects.filter((p) => pipelineStatuses.includes(p.status)).reduce((s, p) => s + plannedMonthly(p, p.resources), 0);
+  const pipeline = projects.filter((p) => pipelineStatuses.includes(p.status)).reduce((s, p) => s + usd(plannedMonthly(p, p.resources), p.currency), 0);
   const byStatus = ["DRAFT", "QUOTED", "NEGOTIATION", "ACTIVE", "ON_HOLD"].map((st) => ({
     label: STATUS_LABEL[st],
-    value: Math.round(projects.filter((p) => p.status === st).reduce((s, p) => s + plannedMonthly(p, p.resources), 0)),
+    value: Math.round(projects.filter((p) => p.status === st).reduce((s, p) => s + usd(plannedMonthly(p, p.resources), p.currency), 0)),
   }));
 
   // Alerts
@@ -79,9 +83,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     prisma.expense.aggregate({ where: { paidOn: null }, _sum: { amountInr: true } }),
     prisma.invoice.count({ where: { status: "DRAFT" } }),
   ]);
-  outstanding = open.reduce((s, i) => s + i.balance, 0);
+  outstanding = open.reduce((s, i) => s + usd(i.balance, i.currency), 0);
   const overdue = open.filter((i) => i.aging !== "Not due");
-  const canSeeFinance = hasRole(user.role, "EDITOR");
+  const canSeeFinance = can(user.role, "finance.view");
   const snap = canSeeFinance ? await cfoSnapshot() : null;
   const alerts = snap ? await computeAlerts(snap) : [];
   const critical = alerts.filter((a) => a.level === "critical");
@@ -89,11 +93,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      {denied && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">That page needs a higher role than {user.role}.</div>}
+      {denied && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">That page isn&apos;t part of the {roleLabel(user.role)} role.</div>}
       <PageHeader
         title={`Welcome, ${user.name.split(" ")[0]}`}
-        subtitle={`${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} · signed in as ${user.role}`}
-        actions={user.role !== "VIEWER" && <><Link href="/calculator" className="btn-secondary">Quick calculator</Link><Link href="/projects/new" className="btn-primary">+ New project</Link></>}
+        subtitle={`${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} · signed in as ${roleLabel(user.role)}`}
+        actions={can(user.role, "finance.edit") && <><Link href="/calculator" className="btn-secondary">Quick calculator</Link><Link href="/projects/new" className="btn-primary">+ New project</Link></>}
       />
 
       {snap && (
@@ -111,7 +115,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </Link>
       )}
 
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4 2xl:grid-cols-6">
         <Stat label="Monthly run-rate (active)" value={usd0(runRate)} hint={`${active.length} active project(s)`} accent />
         <Stat label="Pipeline / month" value={usd0(pipeline)} hint="Draft + Quoted + Negotiation" />
         <Stat label={`Billed ${monthLabel(thisMonth)}`} value={usd0(monthRev)} hint={`${missingMonth.length} active project(s) not recorded yet`} />
@@ -124,7 +128,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <>
             <Stat label={`Spend ${monthLabel(thisMonth)}`} value={<Link href="/expenses" className="hover:underline">{inr(spendMonth._sum.amountInr ?? 0)}</Link>} hint="Expenses booked, ₹" />
             <Stat label="Unpaid bills" value={inr(payables._sum.amountInr ?? 0)} hint="Payables not yet marked paid" />
-            <Stat label="Overdue receivables" value={usd0(overdue.reduce((s, i) => s + i.balance, 0))} hint={`${open.length} open invoice(s)`} />
+            <Stat label="Overdue receivables" value={usd0(overdue.reduce((s, i) => s + usd(i.balance, i.currency), 0))} hint={`${open.length} open invoice(s)`} />
             <Stat label="Late milestones" value={lateMilestones.length} hint="Past due, not done" />
           </>
         )}
@@ -135,13 +139,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <div className="card-t mb-2">Needs attention</div>
           <ul className="space-y-1 text-sm">
             {belowFloor.map((p) => (
-              <li key={`bf${p.id}`}>⚠ <Link href={`/projects/${p.id}?tab=pricing`} className="text-brand-fg hover:underline">{p.code} {p.name}</Link> has rates below the negotiation floor.</li>
+              <li key={`bf${p.id}`}>⚠ <Link href={`/finance/projects/${p.id}?tab=pricing`} className="text-brand-fg hover:underline">{p.code} {p.name}</Link> has rates below the negotiation floor.</li>
             ))}
             {missingMonth.map((p) => (
-              <li key={`mm${p.id}`}>◷ <Link href={`/projects/${p.id}?tab=monthly&month=new`} className="text-brand-fg hover:underline">{p.code} {p.name}</Link> — no billing record for {monthLabel(thisMonth)}.</li>
+              <li key={`mm${p.id}`}>◷ <Link href={`/finance/projects/${p.id}?tab=monthly&month=new`} className="text-brand-fg hover:underline">{p.code} {p.name}</Link> — no billing record for {monthLabel(thisMonth)}.</li>
             ))}
             {overdue.map((i) => (
-              <li key={`od${i.id}`}>$ <Link href={`/invoices/${i.id}`} className="text-brand-fg hover:underline">{i.number}</Link> ({i.client.name}) is {i.aging} days past due — balance {usd0(i.balance)}.</li>
+              <li key={`od${i.id}`}>$ <Link href={`/invoices/${i.id}`} className="text-brand-fg hover:underline">{i.number}</Link> ({i.client.name}) is {i.aging} days past due — balance {money(i.balance, i.currency)}.</li>
             ))}
             {lateMilestones.map((m) => (
               <li key={`ms${m.id}`}>◆ <Link href={`/projects/${m.project.id}?tab=milestones`} className="text-brand-fg hover:underline">{m.project.code}: {m.title}</Link> was due {date(m.dueDate)}.</li>
@@ -165,11 +169,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             {active.map((p) => (
               <tr key={p.id}>
                 <td className="font-mono text-xs">{p.code}</td>
-                <td><Link href={`/projects/${p.id}`} className="font-medium text-brand-fg hover:underline">{p.name}</Link></td>
+                <td><Link href={`/finance/projects/${p.id}`} className="font-medium text-brand-fg hover:underline">{p.name}</Link></td>
                 <td>{p.client.name}</td>
                 <td className="text-xs">{MODELS[p.engagementModel]}</td>
                 <td className="num">{quoteSummary(p.resources).hours}</td>
-                <td className="num font-semibold">{usd0(plannedMonthly(p, p.resources))}</td>
+                <td className="num font-semibold">{usd0(usd(plannedMonthly(p, p.resources), p.currency))}</td>
                 <td>{p.months.some((m) => m.month === thisMonth) ? <span className="badge bg-emerald-50 text-emerald-700">Recorded</span> : <span className="text-xs text-amber-700">Not recorded</span>}</td>
               </tr>
             ))}

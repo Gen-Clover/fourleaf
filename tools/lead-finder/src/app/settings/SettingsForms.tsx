@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { saveLfSettings, saveNiches } from "../actions";
 
-type Setting = { key: string; value: string; label: string; unit: string | null; description: string | null };
+type Setting = { key: string; value: string; label: string; type: string; unit: string | null; description: string | null };
 type Niche = { key: string; label: string; phrases: string[]; market: string; value: string; bookingRelevant: boolean; active: boolean };
 
 const Msg = ({ m }: { m: { ok: boolean; message: string } | undefined }) => (m ? <span className={`text-sm ${m.ok ? "text-emerald-700" : "text-red-600"}`}>{m.message}</span> : null);
@@ -19,7 +19,11 @@ export function LfSettingsForm({ settings }: { settings: Setting[] }) {
         {settings.map((s) => (
           <div key={s.key}>
             <label className="label" htmlFor={s.key}>{s.label}{s.unit && <span className="text-neutral-400"> ({s.unit})</span>}</label>
-            <input id={s.key} className="input" type="number" step="any" min={0} value={values[s.key]} onChange={(e) => setValues({ ...values, [s.key]: e.target.value })} />
+            {s.type === "text" ? (
+              <input id={s.key} className="input" type="url" placeholder="https://…" value={values[s.key]} onChange={(e) => setValues({ ...values, [s.key]: e.target.value })} />
+            ) : (
+              <input id={s.key} className="input" type="number" step="any" min={0} value={values[s.key]} onChange={(e) => setValues({ ...values, [s.key]: e.target.value })} />
+            )}
             {s.description && <p className="mt-1 text-xs text-neutral-500">{s.description}</p>}
           </div>
         ))}

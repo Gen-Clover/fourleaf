@@ -1,0 +1,24 @@
+{
+  "name": "@genclover/delivery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Delivery & Resources: projects, scope, milestones, team, timesheets and approval, resource pool and requests",
+  "exports": {
+    "./app/*": "./src/app/*.tsx",
+    "./lib/*": "./src/lib/*.ts",
+    "./nav": "./src/nav.ts"
+  },
+  "dependencies": {
+    "@genclover/auth": "*",
+    "@genclover/db": "*",
+    "@genclover/finance": "*",
+    "@genclover/ids": "*",
+    "@genclover/people": "*",
+    "@genclover/ui": "*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "next": "15.5.26",
+    "react": "19.1.0"
+  }
+}

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@genclover/db";
-import { assertRole } from "@genclover/auth";
+import { assertPermission } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
 import { utcDay } from "../../lib/finance";
 import { type Result, fail, optStr } from "@genclover/ui/result";
@@ -21,7 +21,7 @@ const CommitmentSchema = z.object({
 
 export async function saveCommitment(id: string | null, _: Result, fd: FormData): Promise<Result> {
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("finance.edit");
     const d = CommitmentSchema.parse(Object.fromEntries(fd));
     const data = { ...d, nextDueDate: utcDay(d.nextDueDate), endDate: d.endDate ? utcDay(d.endDate) : null, essential: fd.get("essential") === "on", active: id ? fd.get("active") === "on" : true };
     if (id) await prisma.commitment.update({ where: { id }, data });
@@ -36,7 +36,7 @@ export async function saveCommitment(id: string | null, _: Result, fd: FormData)
 }
 
 export async function deleteCommitment(id: string) {
-  const user = await assertRole("EDITOR");
+  const user = await assertPermission("finance.edit");
   const c = await prisma.commitment.delete({ where: { id } });
   await audit(user, "DELETE", "Commitment", id, `${c.name} deleted`);
   revalidatePath("/commitments");

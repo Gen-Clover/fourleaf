@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentUser, hasRole } from "@genclover/auth";
+import { getCurrentUser, can } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { listWhere, orderBy, parseFilters, scoreField } from "../lib/query";
 import { SERVICE, isService, STAGE_LABEL } from "../lib/services";
@@ -13,10 +13,10 @@ const cell = (v: unknown) => {
 /** The lead list as CSV, with the same filters as the page. */
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
-  if (!user || !hasRole(user.role, "EDITOR")) return new NextResponse("Forbidden", { status: 403 });
-  const f = parseFilters(Object.fromEntries(req.nextUrl.searchParams));
+  if (!user || !can(user.role, "leads.edit")) return new NextResponse("Forbidden", { status: 403 });
+  const f = parseFilters(Object.fromEntries(req.nextUrl.searchParams), user.id);
   const s = await getLfSettings();
-  const leads = await prisma.lead.findMany({ where: listWhere(f, s.hotScore, s.warmScore), orderBy: orderBy(f), take: 5000 });
+  const leads = await prisma.lead.findMany({ where: listWhere(f, s), orderBy: orderBy(f), take: 5000 });
   const field = scoreField(f);
   const head = ["Lead ID", "Business", "Niche", "Area", "Stage", "Do not contact", "Score", "Best service", "Phone", "Email", "Website", "Rating", "Reviews", "Next follow-up", "Added"];
   const rows = leads.map((l) => [

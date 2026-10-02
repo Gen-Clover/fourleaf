@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { type Bucket, MODELS, type ResourceLine, monthlyRevenue, effectiveRate, lineHours, quoteSummary, split } from "../../../lib/calc";
-import { KIND_LABEL, PROJECT_KINDS, PROJECT_STATUSES, STATUS_LABEL, pct, toInputDate, usd } from "@genclover/ui/format";
-import { saveAgreement, updateProject } from "../actions";
+import { pct, toInputDate, usd } from "@genclover/ui/format";
+import { saveAgreement } from "../actions";
+import { useFormAction } from "@genclover/ui/form-action";
 
 type P = {
   id: string;
@@ -32,68 +33,8 @@ const VISIBLE: Record<string, string[]> = {
   RETAINER: ["agreedMonthly", "agreedRetainerHrs", "agreedExtraRate"],
   BLENDED: ["agreedBlendedRate"],
   FIXED: ["agreedMonthly"],
+  FIXED_PRICE: [],
 };
-
-export function ProjectInfoForm({ project, client, readOnly }: { project: P; client: { code: string; name: string }; readOnly: boolean }) {
-  const [state, action, pending] = useActionState(updateProject.bind(null, project.id), undefined);
-  return (
-    <form action={action} className="card space-y-4 p-5">
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="md:col-span-2">
-          <label className="label">Project name</label>
-          <input className="input" name="name" defaultValue={project.name} required disabled={readOnly} />
-        </div>
-        <div>
-          <label className="label">Status</label>
-          <select className="input" name="status" defaultValue={project.status} disabled={readOnly}>
-            {PROJECT_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="label">Client</label>
-          <input className="input" value={`${client.code} · ${client.name}`} disabled title="Fixed: the project ID belongs to this client" />
-        </div>
-        <div>
-          <label className="label">Type</label>
-          <select className="input" name="kind" defaultValue={project.kind} disabled={readOnly}>
-            {PROJECT_KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="label">Engagement model</label>
-          <select className="input" name="engagementModel" defaultValue={project.engagementModel} disabled={readOnly}>
-            {Object.entries(MODELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="label">Start</label><input className="input" type="date" name="startDate" defaultValue={d(project.startDate)} disabled={readOnly} /></div>
-          <div><label className="label">End</label><input className="input" type="date" name="endDate" defaultValue={d(project.endDate)} disabled={readOnly} /></div>
-        </div>
-      </div>
-      <div className="grid gap-4 md:grid-cols-[1fr_10rem_12rem]">
-        <div>
-          <label className="label">Scope / description</label>
-          <textarea className="input" name="description" rows={3} defaultValue={project.description ?? ""} disabled={readOnly} />
-        </div>
-        <div>
-          <label className="label">Win probability %</label>
-          <input className="input" type="number" min={0} max={100} name="probability" defaultValue={project.probability ?? ""} disabled={readOnly} />
-          <p className="mt-0.5 text-[11px] text-neutral-500">For pipeline & forecast</p>
-        </div>
-        <div>
-          <label className="label">Expected close</label>
-          <input className="input" type="date" name="expectedCloseDate" defaultValue={d(project.expectedCloseDate)} disabled={readOnly} />
-        </div>
-      </div>
-      {!readOnly && (
-        <div className="flex items-center gap-3">
-          <button className="btn-primary" disabled={pending}>{pending ? "Saving…" : "Save details"}</button>
-          {state && <span className={`text-sm ${state.ok ? "text-emerald-700" : "text-red-600"}`}>{state.message}</span>}
-        </div>
-      )}
-    </form>
-  );
-}
 
 export function AgreementForm({
   project,
@@ -106,7 +47,7 @@ export function AgreementForm({
   buckets: Bucket[];
   readOnly: boolean;
 }) {
-  const [state, action, pending] = useActionState(saveAgreement.bind(null, project.id), undefined);
+  const { state, pending, form } = useFormAction(saveAgreement.bind(null, project.id));
   const [a, setA] = useState({
     engagementModel: project.engagementModel,
     agreedMonthly: project.agreedMonthly?.toString() ?? "",
@@ -137,7 +78,7 @@ export function AgreementForm({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
-      <form action={action} className="card space-y-4 p-5">
+      <form {...form} className="card space-y-4 p-5">
         <div className="card-t">Final agreed commercial terms</div>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="md:col-span-2">

@@ -1,12 +1,12 @@
 import { PageHeader, Stat } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { monthUsage } from "../../lib/google";
 import { getLfSettings, googleKeyConfigured } from "../../lib/settings";
 import { LfSettingsForm, NichesForm } from "./SettingsForms";
 
 export default async function LeadFinderSettings() {
-  await requireRole("ADMIN");
+  await requirePermission("leads.settings");
   const [settings, niches, s] = await Promise.all([
     prisma.setting.findMany({ where: { group: "Lead Finder" }, orderBy: { sortOrder: "asc" } }),
     prisma.leadNiche.findMany({ orderBy: { sortOrder: "asc" } }),
@@ -23,7 +23,7 @@ export default async function LeadFinderSettings() {
         <Stat label="Area + refresh requests" value={usage.counts.AREA + usage.counts.DETAILS} hint="Area lookups and 30-day refreshes" />
       </div>
       <div className="space-y-6">
-        <LfSettingsForm settings={settings.map(({ key, value, label, unit, description }) => ({ key, value, label, unit, description }))} />
+        <LfSettingsForm settings={settings.map(({ key, value, label, type, unit, description }) => ({ key, value, label, type, unit, description }))} />
         <NichesForm niches={niches.map(({ key, label, phrases, market, value, bookingRelevant, active }) => ({ key, label, phrases, market, value, bookingRelevant, active }))} />
         <p className="text-xs text-neutral-500">
           Google data rule: only place IDs may be kept indefinitely. Leads you are still working get fresh Google data every 30 days; leads that are won,

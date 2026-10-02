@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@genclover/db";
-import { assertRole } from "@genclover/auth";
+import { assertPermission } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
 import { utcDay } from "../../lib/finance";
 import { type Result, fail } from "@genclover/ui/result";
@@ -20,7 +20,7 @@ const Movement = z.object({
 /** Opening balance, transfer between funds (e.g. emergency withdrawal from Survival), or a manual adjustment. Admin only. */
 export async function fundMovement(input: unknown): Promise<Result> {
   try {
-    const user = await assertRole("ADMIN");
+    const user = await assertPermission("finance.edit");
     const d = Movement.parse(input);
     const date = utcDay(d.date);
     const base = { date, note: d.note, createdBy: user.name };
@@ -48,7 +48,7 @@ export async function fundMovement(input: unknown): Promise<Result> {
 }
 
 export async function deleteFundEntry(id: string) {
-  const user = await assertRole("ADMIN");
+  const user = await assertPermission("finance.edit");
   const e = await prisma.fundEntry.findUniqueOrThrow({ where: { id } });
   if (e.type === "ALLOCATION") throw new Error("Allocations come from payments — delete the payment instead");
   await prisma.fundEntry.deleteMany({ where: e.transferId ? { transferId: e.transferId } : { id } });

@@ -19,10 +19,12 @@ type F = {
   gOlder: string;
   branches: string;
   claude: string;
+  owner: string;
+  stuck: string;
 };
 
 /** Filters apply as soon as they change; the text search on Enter. */
-export default function FilterBar({ filters, niches }: { filters: F; niches: { key: string; label: string }[] }) {
+export default function FilterBar({ filters, niches, users, meId }: { filters: F; niches: { key: string; label: string }[]; users: { id: string; name: string }[]; meId: string }) {
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
@@ -64,6 +66,7 @@ export default function FilterBar({ filters, niches }: { filters: F; niches: { k
         {select("site", "Website", [["", "Any"], ...Object.entries(SITE_STATES)])}
         {select("niche", "Niche", [["", "All niches"], ...niches.map((n) => [n.key, n.label] as [string, string])])}
         {select("followUp", "Follow-up", [["", "Any"], ["DUE", "Due now"]])}
+        {select("owner", "Owner", [["", "Anyone"], ["none", "Unassigned"], ...users.map((u) => [u.id, u.id === meId ? `${u.name} (me)` : u.name] as [string, string])])}
         {select("claude", "Claude review", [["", "Any"], ["HIGH", "High fit"], ["MEDIUM", "Medium fit"], ["LOW", "Low fit"], ["NONE", "Not reviewed"]])}
         {select("sort", "Sort", [["score", "Best score"], ["followup", "Next follow-up (scheduled)"], ["google", "Google data (oldest first)"], ["newest", "Newest"], ["name", "Name"]])}
       </div>
@@ -78,6 +81,10 @@ export default function FilterBar({ filters, niches }: { filters: F; niches: { k
           <input type="date" className="input-sm" value={filters.gTo} onChange={(e) => set({ gTo: e.target.value, gOlder: "" })} />
         </label>
         {select("gOlder", "or older than", [["", "—"], ["20", "20 days"], ["25", "25 days"], ["30", "30 days"]])}
+        <label className="flex items-center gap-2 pb-1.5 text-sm text-neutral-600" title="Replied, call / meeting or proposal with nothing happening for the days set in Settings">
+          <input type="checkbox" checked={filters.stuck === "1"} onChange={(e) => set({ stuck: e.target.checked ? "1" : "", stage: e.target.checked ? "ALL" : "" })} />
+          Stuck deals only
+        </label>
         <label className="flex items-center gap-2 pb-1.5 text-sm text-neutral-600">
           <input type="checkbox" checked={filters.branches === "show"} onChange={(e) => set({ branches: e.target.checked ? "show" : "" })} />
           Show every branch
@@ -92,7 +99,7 @@ export default function FilterBar({ filters, niches }: { filters: F; niches: { k
             ✕ This search only
           </button>
         )}
-        {params.toString().replace(/(^|&)page=d+/, "") && (
+        {params.toString().replace(/(^|&)page=\d+/, "") && (
           <button type="button" className="btn-secondary btn-sm ml-auto" onClick={() => router.push(path)}>
             ✕ Clear all filters
           </button>

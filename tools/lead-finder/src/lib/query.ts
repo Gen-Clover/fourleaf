@@ -21,11 +21,14 @@ export type LeadFilters = {
   /** "" = hide other branches of the same business; "show" = list every branch. */
   branches: string;
   claude: string; // "" | HIGH | MEDIUM | LOW | NONE (not reviewed)
+  owner: string; // "" | none | a user id
+  stuck: string; // "" | 1
   sort: string; // score | newest | name | followup | google
   page: number;
 };
 
-export function parseFilters(sp: Record<string, string | string[] | undefined>): LeadFilters {
+/** meId: the signed-in user, so "owner=me" in a link means whoever opens it. */
+export function parseFilters(sp: Record<string, string | string[] | undefined>, meId?: string): LeadFilters {
   const one = (k: string) => (Array.isArray(sp[k]) ? sp[k][0] : sp[k]) ?? "";
   const service = one("service");
   const market = one("market");
@@ -44,16 +47,44 @@ export function parseFilters(sp: Record<string, string | string[] | undefined>):
     gOlder: /^\d{1,3}$/.test(one("gOlder")) ? one("gOlder") : "",
     branches: one("branches") === "show" ? "show" : "",
     claude: ["HIGH", "MEDIUM", "LOW", "NONE"].includes(one("claude")) ? one("claude") : "",
+    owner: one("owner") === "me" ? (meId ?? "") : /^[\w-]{1,40}$/.test(one("owner")) ? one("owner") : "",
+    stuck: one("stuck") === "1" ? "1" : "",
     sort: one("sort") || "score",
     page: Math.max(1, Number(one("page")) || 1),
+  };
+}
+
+export type StuckDays = { stuckRepliedDays: number; stuckMeetingDays: number; stuckProposalDays: number };
+/** The settings the filters need: hot / warm score lines and the "stuck" days. */
+export type FilterSettings = StuckDays & { hotScore: number; warmScore: number };
+
+/**
+ * "Stuck": in Replied, Call / meeting or Proposal sent longer than the set days, with no message since
+ * and no call or meeting planned.
+ */
+export function stuckWhere(s: StuckDays, now = new Date()): Prisma.LeadWhereInput {
+  const ago = (days: number) => new Date(now.getTime() - days * 86_400_000);
+  const rule = (stage: string, days: number): Prisma.LeadWhereInput => ({
+    stage,
+    stageChangedAt: { not: null, lt: ago(days) },
+    OR: [{ lastContactAt: null }, { lastContactAt: { lt: ago(days) } }],
+  });
+  return {
+    doNotContact: false,
+    tasks: { none: { status: "OPEN" } },
+    OR: [rule("REPLIED", s.stuckRepliedDays), rule("MEETING", s.stuckMeetingDays), rule("PROPOSAL", s.stuckProposalDays)],
   };
 }
 
 export const scoreField = (f: LeadFilters) => f.service?.field ?? "bestScore";
 
 /** Where clause for everything except the service lens (the tabs count each service within it). */
-export function baseWhere(f: LeadFilters, hot: number, warm: number): Prisma.LeadWhereInput {
+export function baseWhere(f: LeadFilters, s: FilterSettings): Prisma.LeadWhereInput {
+  const { hotScore: hot, warmScore: warm } = s;
   const and: Prisma.LeadWhereInput[] = [];
+  if (f.owner === "none") and.push({ ownerId: null });
+  else if (f.owner) and.push({ ownerId: f.owner });
+  if (f.stuck) and.push(stuckWhere(s));
   if (f.stage === "OPEN") and.push({ stage: { in: [...OPEN_STAGES] }, doNotContact: false });
   else if (f.stage === "DNC") and.push({ doNotContact: true });
   else if ((STAGES as readonly string[]).includes(f.stage)) and.push({ stage: f.stage });
@@ -87,8 +118,8 @@ export function baseWhere(f: LeadFilters, hot: number, warm: number): Prisma.Lea
 }
 
 /** With the service lens: only leads that have an opportunity for that service. */
-export function listWhere(f: LeadFilters, hot: number, warm: number): Prisma.LeadWhereInput {
-  const base = baseWhere(f, hot, warm);
+export function listWhere(f: LeadFilters, s: FilterSettings): Prisma.LeadWhereInput {
+  const base = baseWhere(f, s);
   return f.service ? { AND: [base, { [f.service.field]: { gt: 0 } }] } : base;
 }
 

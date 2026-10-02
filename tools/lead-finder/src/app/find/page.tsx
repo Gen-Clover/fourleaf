@@ -1,5 +1,5 @@
 import { PageHeader } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { MARKETS, MARKET_KEYS } from "../../lib/markets";
 import { SERVICES } from "../../lib/services";
@@ -7,7 +7,7 @@ import { googleKeyConfigured } from "../../lib/settings";
 import NewSearchForm from "./NewSearchForm";
 
 export default async function NewSearchPage() {
-  await requireRole("EDITOR");
+  await requirePermission("leads.edit");
   const niches = await prisma.leadNiche.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" }, select: { key: true, label: true, phrases: true, market: true } });
   return (
     <>

@@ -1,55 +1,80 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader, ReadOnlyNote } from "@genclover/ui";
-import { hasRole, requireUser } from "@genclover/auth";
+import { can, requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
-import { suggestClientCode } from "@genclover/ids";
-import { date } from "@genclover/ui/format";
+import { date, money } from "@genclover/ui/format";
 import { emailConfigured } from "../../lib/email";
 import { messageOptions } from "../../lib/leadMessages";
 import { localTime, marketOf } from "../../lib/markets";
 import { whatsappNumber } from "../../lib/messages";
-import { shortName } from "../../lib/names";
 import type { Reason } from "../../lib/scoring";
+import { OPEN_OPP_STAGES, OPP_STAGES } from "../../lib/b2b";
+import { canSeeDeal, NO_DEAL, visibleDealValues } from "../../lib/dealAccess";
+import { awaitingOurReply } from "../../lib/outreach";
 import { SERVICES, SOURCES, STAGE_LABEL } from "../../lib/services";
-import { getLfSettings } from "../../lib/settings";
+import { getLfSettings, getLfTexts } from "../../lib/settings";
+import { googleCalendarLink, icsFile } from "../../lib/tasks";
 import AutoRefresh from "../AutoRefresh";
 import { Check, Score, StageBadge } from "../bits";
 import { ClaudePanel, RepliedButton, UndoButton } from "../ClaudePanel";
 import { Composer } from "../Composer";
 import { recheckWebsite } from "../actions";
-import { ActivityForm, ConvertForm, DetailsForm, StageForm } from "./LeadForms";
+import AccountPanel from "./AccountPanel";
+import { ActivityForm, DetailsForm } from "./LeadForms";
+import StagePanel from "./StagePanel";
+import { TasksCard } from "./TasksCard";
 
-const ACTIVITY_ICON: Record<string, string> = { NOTE: "✎", WHATSAPP: "💬", EMAIL: "✉", CALL: "☎", VISIT: "⌂", STAGE: "→", SYSTEM: "•", REPLY: "↩" };
+const ACTIVITY_ICON: Record<string, string> = { NOTE: "✎", WHATSAPP: "💬", EMAIL: "✉", LINKEDIN: "in", CALL: "☎", VISIT: "⌂", STAGE: "→", SYSTEM: "•", REPLY: "↩" };
 const FIT_COLOR: Record<string, string> = { HIGH: "bg-emerald-50 text-emerald-700", MEDIUM: "bg-amber-50 text-amber-700", LOW: "bg-neutral-100 text-neutral-600" };
 
 export default async function LeadPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
+  // Onboarding sees won leads only, as a hand-over sheet: what was sold and how to reach them. Only those
+  // fields are read, so nothing else about the lead (deal value, notes, messages) can reach their browser.
+  if (!can(user.role, "leads.view")) {
+    const won = await prisma.lead.findFirst({ where: { id, stage: "WON" }, select: HANDOVER_FIELDS });
+    if (!won) notFound();
+    return <WonHandover lead={won} />;
+  }
   const lead = await prisma.lead.findUnique({
     where: { id },
+    omit: NO_DEAL,
     include: {
       activities: { orderBy: { at: "desc" }, take: 100 },
       audits: { orderBy: { createdAt: "desc" }, take: 1 },
       hits: { include: { search: { select: { id: true, nicheLabel: true, areaLabel: true, createdAt: true } } } },
       client: { select: { id: true, number: true, code: true } },
+      tasks: { where: { status: "OPEN" }, orderBy: { dueAt: "asc" } },
+      contacts: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      opportunities: { orderBy: { createdAt: "desc" }, omit: { value: true } },
     },
   });
   if (!lead) notFound();
-  const [settings, niches, clientCodes, branches] = await Promise.all([
+  const dealValues = await visibleDealValues(user, lead.opportunities.map((o) => o.id));
+  const b2b = lead.kind === "B2B";
+  const primaryContact = lead.contacts.find((c) => c.isPrimary) ?? lead.contacts[0];
+  const [settings, niches, texts, users, branches] = await Promise.all([
     getLfSettings(),
     prisma.leadNiche.findMany({ orderBy: { sortOrder: "asc" }, select: { key: true, label: true, market: true } }),
-    prisma.client.findMany({ select: { code: true } }),
+    getLfTexts(),
+    prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     lead.brandKey ? prisma.lead.findMany({ where: { brandKey: lead.brandKey, id: { not: lead.id } }, select: { id: true, name: true, area: true, reviewCount: true, branchOfId: true } }) : [],
   ]);
-  const canEdit = hasRole(user.role, "EDITOR");
+  const canEdit = can(user.role, "leads.edit");
   const niche = niches.find((n) => n.key === lead.nicheKey);
   const market = marketOf(lead.market);
   const audit = lead.audits[0];
   const reasons: Reason[] = lead.reasons ? JSON.parse(lead.reasons) : [];
   const opportunities = SERVICES.map((s) => ({ ...s, score: lead[s.field] })).filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
   const checking = lead.auditStatus === "PENDING";
-  const { stepLabel, options } = messageOptions(lead, user.name.split(" ")[0]);
+  const { stepLabel, options } = messageOptions(lead, user.name.split(" ")[0], { bookingLink: texts.bookingLink });
+  const showDeal = canSeeDeal(user, lead);
+  const openDeal = lead.opportunities.find((o) => OPEN_OPP_STAGES.includes(o.stage));
+  // The 1-hour answer target applies only while the lead is being worked (not once won, lost or snoozed).
+  const replyDueAt = ["CONTACTED", "REPLIED", "MEETING", "PROPOSAL"].includes(lead.stage) && awaitingOurReply(lead) && lead.lastReplyAt ? new Date(lead.lastReplyAt.getTime() + 3_600_000).toISOString() : null;
+  const stageDays = lead.stageChangedAt ? Math.floor((Date.now() - lead.stageChangedAt.getTime()) / 86_400_000) : null;
   const socials: Record<string, string> = lead.socials ? JSON.parse(lead.socials) : {};
   const primary = lead.branchOfId ? branches.find((b) => b.id === lead.branchOfId) : null;
   const time = localTime(lead.market, lead.lng);
@@ -88,9 +113,16 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
 
       <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <div className="min-w-0 space-y-6">
+          <AccountPanel
+            leadId={lead.id}
+            canEdit={canEdit}
+            info={{ kind: lead.kind, industry: lead.industry, subIndustry: lead.subIndustry, companySize: lead.companySize, linkedinUrl: lead.linkedinUrl, services: lead.services }}
+            contacts={lead.contacts}
+          />
+          {!b2b && (
           <section className="card">
             <div className="card-h">
-              <div className="card-t">Opportunities</div>
+              <div className="card-t">What they need</div>
               <span className="text-xs text-neutral-500">Need (up to 60) + ability to pay ({lead.ability} of 40)</span>
             </div>
             {opportunities.length === 0 ? (
@@ -117,6 +149,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
               </div>
             )}
           </section>
+          )}
 
           <section className="card">
             <div className="card-h">
@@ -133,11 +166,38 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                 doNotContact={lead.doNotContact}
                 whatsapp={whatsappNumber(lead.whatsappNumber, lead.intlPhone, lead.phone, lead.market)}
                 email={lead.emailBounced ? null : lead.email}
-                emailFirst={market.emailFirst}
+                linkedin={primaryContact?.linkedinUrl ?? lead.linkedinUrl}
+                emailFirst={b2b || market.emailFirst}
                 smtp={emailConfigured()}
                 options={options}
               />
             </div>
+          </section>
+
+          <section className="card">
+            <div className="card-h">
+              <div className="card-t">Deals</div>
+              {canEdit && <Link href={`/leads/opportunities/new?lead=${lead.id}`} className="btn-secondary btn-sm">+ Opportunity</Link>}
+            </div>
+            <ul className="divide-y divide-neutral-100 text-sm">
+              {lead.opportunities.map((o) => (
+                <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5">
+                  <span className="min-w-0">
+                    <Link href={`/leads/opportunities/${o.id}`} className="font-medium text-brand-fg hover:underline">{o.title}</Link>
+                    <span className="ml-2 font-mono text-xs text-neutral-500">{o.code}</span>
+                  </span>
+                  <span className="flex items-center gap-2 text-xs text-neutral-600">
+                    {dealValues.get(o.id) != null && <span>{money(dealValues.get(o.id)!, o.currency)}</span>}
+                    <span className="badge bg-neutral-100 text-neutral-700">{OPP_STAGES[o.stage]?.label.split(" (")[0] ?? o.stage}</span>
+                  </span>
+                </li>
+              ))}
+              {lead.opportunities.length === 0 && (
+                <li className="px-5 py-3 text-neutral-500">
+                  No deals yet. {b2b ? "Add one per piece of work (e.g. data migration, web app)." : "Add one once they're discussing a price, or winning the lead records one."} A deal holds the value, the chance of winning and the expected close date.
+                </li>
+              )}
+            </ul>
           </section>
 
           <section className="card">
@@ -241,30 +301,62 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         </div>
 
         <aside className="space-y-4">
-          {!lead.client && canEdit && lead.stage !== "WON" && (
-            <ConvertForm
-              id={lead.id}
-              defaults={{
-                name: shortName(lead.name),
-                code: suggestClientCode(shortName(lead.name), new Set(clientCodes.map((c) => c.code))),
-                contactName: lead.contactName ?? lead.personName,
-                email: lead.email,
-                phone: lead.intlPhone ?? lead.phone,
-                country: market.country,
-                city: lead.area,
-              }}
-            />
-          )}
-          <StageForm
-            // Remount after a save so the form shows the saved values.
-            key={`${lead.stage}-${lead.nextFollowUpAt?.toISOString()}-${lead.doNotContact}`}
+          <StagePanel
+            // Remount after a change so the forms start fresh.
+            key={`${lead.stage}-${lead.stageChangedAt?.toISOString()}-${lead.nextFollowUpAt?.toISOString()}-${lead.doNotContact}-${lead.ownerId}`}
             id={lead.id}
             stage={lead.stage}
-            lostReason={lead.lostReason}
+            stageDays={stageDays}
+            replyCategory={lead.replyCategory}
+            replyDueAt={replyDueAt}
+            snoozeUntil={lead.snoozeUntil?.toISOString() ?? null}
             nextFollowUpAt={lead.nextFollowUpAt?.toISOString() ?? null}
             doNotContact={lead.doNotContact}
+            ownerId={lead.ownerId}
+            users={users}
             canEdit={canEdit}
+            // Winning marks the open deal won; with none, the Won form records one (and its value, if allowed).
+            openDeal={openDeal ? `${openDeal.code} · ${openDeal.title}` : null}
+            canSetValue={showDeal}
+            defaultCurrency={lead.market === "US" ? "USD" : "INR"}
           />
+          {lead.stage === "WON" && (
+            <div className="card space-y-1 p-4 text-sm">
+              <div className="card-t mb-1">Won</div>
+              <div>
+                {lead.wonPackage}
+                {lead.wonCarePlan && lead.wonCarePlan !== "None" && ` + ${lead.wonCarePlan}`}
+              </div>
+              {lead.wonAddOns.length > 0 && <div className="text-neutral-600">Add-ons: {lead.wonAddOns.join(", ")}</div>}
+              {lead.wonReason && <div className="text-neutral-600">Why: {lead.wonReason}</div>}
+              <div className="pt-1 text-xs text-neutral-500">
+                {lead.client ? (
+                  <Link className="text-brand-fg underline" href={`/clients/${lead.client.id}`}>Onboarded: {lead.client.number} · {lead.client.code}</Link>
+                ) : (
+                  "Waiting for onboarding: the client is created in Client Onboarding."
+                )}
+              </div>
+            </div>
+          )}
+          {!["WON", "LOST", "NOT_A_FIT"].includes(lead.stage) && (
+            <TasksCard
+              leadId={lead.id}
+              meId={user.id}
+              users={users}
+              canEdit={canEdit}
+              tasks={lead.tasks.map((t) => ({
+                id: t.id,
+                type: t.type,
+                dueAt: t.dueAt.toISOString(),
+                durationMin: t.durationMin,
+                link: t.link,
+                agenda: t.agenda,
+                assigneeName: t.assigneeName,
+                googleLink: googleCalendarLink(t, lead),
+                ics: icsFile(t, lead),
+              }))}
+            />
+          )}
 
           <div className="card space-y-2 p-4 text-sm">
             <div className="card-t mb-1">Business</div>
@@ -317,7 +409,15 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                 ))}
               </div>
             )}
-            {lead.lostReason && <div className="text-xs text-neutral-500">{STAGE_LABEL.LOST}: {lead.lostReason}</div>}
+            {lead.stage === "LOST" && lead.lostReason && (
+              <div className="text-xs text-neutral-500">
+                {STAGE_LABEL.LOST}: {lead.lostReason}
+                {lead.lostCompetitor && ` · went with ${lead.lostCompetitor}`}
+                {lead.retryAt && ` · try again ${date(lead.retryAt)}`}
+              </div>
+            )}
+            {lead.stage === "NOT_A_FIT" && lead.notFitReason && <div className="text-xs text-neutral-500">Not a fit: {lead.notFitReason}</div>}
+            {lead.ownerName && <div className="text-xs text-neutral-500">Owner: {lead.ownerName}</div>}
           </div>
 
           <DetailsForm
@@ -327,6 +427,99 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             lead={{ contactName: lead.contactName, email: lead.email, phone: lead.phone, website: lead.website, nicheKey: lead.nicheKey }}
           />
         </aside>
+      </div>
+    </>
+  );
+}
+
+const HANDOVER_FIELDS = {
+  id: true,
+  name: true,
+  code: true,
+  area: true,
+  address: true,
+  contactName: true,
+  personName: true,
+  phone: true,
+  intlPhone: true,
+  email: true,
+  website: true,
+  wonAt: true,
+  wonPackage: true,
+  wonCarePlan: true,
+  wonAddOns: true,
+  ownerName: true,
+  client: { select: { id: true, number: true, code: true } },
+} as const;
+
+type HandoverLead = {
+  id: string;
+  name: string;
+  code: string;
+  area: string | null;
+  address: string | null;
+  contactName: string | null;
+  personName: string | null;
+  phone: string | null;
+  intlPhone: string | null;
+  email: string | null;
+  website: string | null;
+  wonAt: Date | null;
+  wonPackage: string | null;
+  wonCarePlan: string | null;
+  wonAddOns: string[];
+  ownerName: string | null;
+  client: { id: string; number: string; code: string } | null;
+};
+
+/** The won lead for the onboarding team: what they bought and who to talk to. No amounts. */
+function WonHandover({ lead }: { lead: HandoverLead }) {
+  const row = (label: string, value: React.ReactNode) =>
+    value ? (
+      <div className="grid grid-cols-[9rem_1fr] gap-2 py-1.5 text-sm">
+        <dt className="text-neutral-500">{label}</dt>
+        <dd className="min-w-0 break-words">{value}</dd>
+      </div>
+    ) : null;
+  return (
+    <>
+      <PageHeader
+        title={lead.name}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-2">
+            <Link href="/leads/won" className="hover:underline">← Won</Link>·<span className="font-mono text-xs">{lead.code}</span>·<StageBadge stage="WON" />
+          </span>
+        }
+      />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <section className="card p-5">
+          <div className="card-t mb-2">What they bought</div>
+          <dl className="divide-y divide-neutral-100">
+            {row("Package", lead.wonPackage)}
+            {row("Care plan", lead.wonCarePlan && lead.wonCarePlan !== "None" ? lead.wonCarePlan : "None")}
+            {row("Add-ons", lead.wonAddOns.join(", ") || "None")}
+            {row("Won on", date(lead.wonAt))}
+            {row("Sold by", lead.ownerName)}
+            {row(
+              "Client",
+              lead.client ? (
+                <Link className="text-brand-fg underline" href={`/clients/${lead.client.id}`}>{lead.client.number} · {lead.client.code}</Link>
+              ) : (
+                "Not onboarded yet"
+              ),
+            )}
+          </dl>
+        </section>
+        <section className="card p-5">
+          <div className="card-t mb-2">Contact</div>
+          <dl className="divide-y divide-neutral-100">
+            {row("Person", lead.contactName ?? lead.personName)}
+            {row("Phone", lead.intlPhone ?? lead.phone)}
+            {row("Email", lead.email)}
+            {row("Website", lead.website && <a className="text-brand-fg underline" href={lead.website} target="_blank" rel="noreferrer">{lead.website}</a>)}
+            {row("Address", lead.address ?? lead.area)}
+          </dl>
+        </section>
       </div>
     </>
   );

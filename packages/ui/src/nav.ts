@@ -5,9 +5,8 @@ export type NavItem = {
   icon: string;
   /** One line shown under the label in menus, so people find the right page without guessing. */
   description?: string;
-  /** Hidden from VIEWER accounts. */
-  editor?: boolean;
 };
+// Who sees an item is decided by its path: packages/auth/src/access.ts.
 
 /** A titled section is a menu in the top bar (and tabs under it on its pages); an untitled one is plain links. */
 export type NavSection = {

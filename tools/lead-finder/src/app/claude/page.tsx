@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { date } from "@genclover/ui/format";
 import { CLAUDE_INSTRUCTIONS } from "../../lib/brief";
@@ -16,7 +16,7 @@ const SIZES = [10, 20, 40];
  * been reviewed go into one brief; Claude's answer is pasted back and saved to each lead.
  */
 export default async function ClaudeReviewPage({ searchParams }: { searchParams: Promise<{ market?: string; n?: string }> }) {
-  await requireRole("EDITOR");
+  await requirePermission("leads.edit");
   const sp = await searchParams;
   const market = isMarket(sp.market) ? sp.market : undefined;
   const n = SIZES.includes(Number(sp.n)) ? Number(sp.n) : 20;

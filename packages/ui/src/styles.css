@@ -242,7 +242,7 @@
     @apply rounded-xl border border-neutral-200 bg-surface shadow-sm;
   }
   .card-h {
-    @apply flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-3;
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-3;
   }
   .card-t {
     @apply font-display text-xs font-semibold tracking-wider text-neutral-700 uppercase;
@@ -296,4 +296,59 @@
   .badge {
     @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap;
   }
+
+  /* Stacked tables on small screens (apps/portal/src/components/ResponsiveTables.tsx adds .tbl-stack to a table
+     that doesn't fit, and labels each cell with its column): one card per row, column name and value per line. */
+  .tbl.tbl-stack,
+  .tbl.tbl-stack > tbody,
+  .tbl.tbl-stack > tfoot,
+  .tbl.tbl-stack tr {
+    display: block;
+    width: 100%;
+  }
+  .tbl.tbl-stack > thead {
+    display: none;
+  }
+  .tbl.tbl-stack > tbody > tr,
+  .tbl.tbl-stack > tfoot > tr {
+    @apply border-b border-neutral-200 px-4 py-2.5;
+  }
+  .tbl.tbl-stack > tfoot > tr {
+    @apply bg-cream;
+  }
+  .tbl.tbl-stack > tbody > tr > td,
+  .tbl.tbl-stack > tfoot > tr > td {
+    @apply flex min-h-7 items-center justify-between gap-4 border-0 bg-transparent px-0 py-1 text-right whitespace-normal;
+  }
+  .tbl.tbl-stack > tbody > tr > td::before,
+  .tbl.tbl-stack > tfoot > tr > td::before {
+    content: attr(data-label);
+    @apply shrink-0 text-left font-display text-[11px] font-semibold tracking-wider text-neutral-500 uppercase;
+  }
+  .tbl.tbl-stack td[data-label=""]::before {
+    content: none;
+  }
+  .tbl.tbl-stack td[data-label=""] {
+    @apply justify-end;
+  }
+  .tbl.tbl-stack td[data-full] {
+    @apply block text-center;
+  }
+  .tbl.tbl-stack > tbody > tr > td:first-child {
+    @apply font-medium;
+  }
+  .tbl.tbl-stack > tbody > tr:hover td {
+    @apply bg-transparent;
+  }
+}
+
+/* Stacked tables (see .tbl-stack above): fields shrink to fit the card and a cell with several fields wraps.
+   Unlayered on purpose, so it wins over fixed-width utilities such as w-64 on those fields. */
+.tbl.tbl-stack > tbody > tr > td {
+  flex-wrap: wrap;
+}
+.tbl.tbl-stack td > :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  width: auto;
+  min-width: 0;
+  max-width: 65%;
 }

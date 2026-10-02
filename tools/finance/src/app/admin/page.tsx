@@ -1,33 +1,35 @@
 import Link from "next/link";
 import { PageHeader, Stat } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { can, canAccessPath, requirePermission, roleLabel } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { getBuckets, getParams } from "../../lib/settings";
 import { bucketTotal } from "../../lib/calc";
 
 export default async function AdminPage() {
-  await requireRole("ADMIN");
+  const user = await requirePermission("finance.settings");
+  const isAdmin = can(user.role, "admin");
   const [users, roles, activeRoles, buckets, p, recent] = await Promise.all([
     prisma.user.groupBy({ by: ["role"], _count: true, where: { active: true } }),
     prisma.roleRate.count(),
     prisma.roleRate.count({ where: { active: true } }),
     getBuckets(),
     getParams(),
-    prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
+    isAdmin ? prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }) : Promise.resolve([]),
   ]);
-  const count = (r: string) => users.find((u) => u.role === r)?._count ?? 0;
+  const activeUsers = users.reduce((n, u) => n + u._count, 0);
+  const byRole = users.map((u) => `${u._count} ${roleLabel(u.role).toLowerCase()}`).join(" · ");
   const tiles = [
     { href: "/admin/rate-card", title: "Manage Rate Card", body: "Add, edit, reorder or retire roles. Standard, floor overrides, market ranges, US salaries, India CTC." },
-    { href: "/admin/formula", title: "Formula & Allocation", body: "Allocation buckets (65/10/25), FX, hours, US load factor, floor & premium rules, packages." },
+    { href: "/admin/formula", title: "Formula & Allocation", body: "Allocation buckets and subcategories, FX, hours, US load factor, floor & premium rules, packages." },
     { href: "/admin/policies", title: "Financial Policies", body: "Allocation policy by company stage (Rate card, Base, Startup, Growth, Mature). Activate one to change how receipts fill the funds." },
-    { href: "/admin/users", title: "Users & Roles", body: "Invite people as Admin, Editor or Viewer. Disable access or reset passwords." },
+    { href: "/admin/users", title: "Users & Roles", body: "Give each person a role: Owner, CFO, Sales, Onboarding, Delivery manager or Team member. Disable access or reset passwords." },
     { href: "/admin/audit", title: "Audit Log", body: "Who changed what and when — rates, formula, projects, agreements and billing." },
-  ];
+  ].filter((t) => canAccessPath(user.role, t.href));
   return (
     <>
       <PageHeader title="Admin Panel" subtitle="Control the rate card, the pricing formula and who can access the portal." />
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat label="Active users" value={count("ADMIN") + count("EDITOR") + count("VIEWER")} hint={`${count("ADMIN")} admin · ${count("EDITOR")} editor · ${count("VIEWER")} viewer`} />
+        <Stat label="Active users" value={activeUsers} hint={byRole} />
         <Stat label="Roles on rate card" value={activeRoles} hint={`${roles - activeRoles} inactive`} />
         <Stat label="Allocation total" value={`${bucketTotal(buckets)}%`} hint={buckets.map((b) => b.percent).join(" / ")} />
         <Stat label="FX assumption" value={`₹${p.fxRate}`} hint="per US$" />
@@ -40,6 +42,7 @@ export default async function AdminPage() {
           </Link>
         ))}
       </div>
+      {isAdmin && (
       <div className="card">
         <div className="card-h"><div className="card-t">Recent activity</div><Link href="/admin/audit" className="text-sm text-brand-fg">View all</Link></div>
         <ul className="divide-y divide-neutral-100">
@@ -51,6 +54,7 @@ export default async function AdminPage() {
           ))}
         </ul>
       </div>
+      )}
     </>
   );
 }

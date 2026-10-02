@@ -1,0 +1,24 @@
+{
+  "name": "@genclover/governance",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Governance & Compliance: compliance calendar, issues and escalations, decisions, approvals inbox",
+  "exports": {
+    "./app/*": "./src/app/*.tsx",
+    "./lib/*": "./src/lib/*.ts",
+    "./nav": "./src/nav.ts",
+    "./jobs": "./src/jobs.ts"
+  },
+  "dependencies": {
+    "@genclover/auth": "*",
+    "@genclover/db": "*",
+    "@genclover/ids": "*",
+    "@genclover/lead-finder": "*",
+    "@genclover/ui": "*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "next": "15.5.26",
+    "react": "19.1.0"
+  }
+}

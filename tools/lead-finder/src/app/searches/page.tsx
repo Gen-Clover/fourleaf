@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Empty, PageHeader } from "@genclover/ui";
-import { hasRole, requireUser } from "@genclover/auth";
+import { can, requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { date } from "@genclover/ui/format";
 import { isService, SERVICE } from "../../lib/services";
@@ -20,12 +20,12 @@ export default async function SearchesPage() {
       <PageHeader
         title="Searches"
         subtitle="Every Google Maps search, newest first."
-        actions={hasRole(user.role, "EDITOR") && <Link href="/leads/find" className="btn-primary">+ New search</Link>}
+        actions={can(user.role, "leads.edit") && <Link href="/leads/find" className="btn-primary">+ New search</Link>}
       />
-      <Schedules schedules={schedules} canEdit={hasRole(user.role, "EDITOR")} />
+      <Schedules schedules={schedules} canEdit={can(user.role, "leads.edit")} />
       <div className="card overflow-x-auto">
         {searches.length === 0 ? (
-          <Empty href={hasRole(user.role, "EDITOR") ? "/leads/find" : undefined} cta="Run your first search">No searches yet.</Empty>
+          <Empty href={can(user.role, "leads.edit") ? "/leads/find" : undefined} cta="Run your first search">No searches yet.</Empty>
         ) : (
           <table className="tbl">
             <thead>

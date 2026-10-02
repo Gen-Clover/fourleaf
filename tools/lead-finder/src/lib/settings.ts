@@ -26,6 +26,10 @@ export type LfSettings = {
   autoEmailFollowUps: number;
   /** Days after the last follow-up with no reply before the lead is closed as Lost (No reply). 0 = off. */
   noReplyDays: number;
+  /** A lead is "stuck" after this many days in the stage with nothing happening. */
+  stuckRepliedDays: number;
+  stuckMeetingDays: number;
+  stuckProposalDays: number;
 };
 
 const DEFAULTS: LfSettings = {
@@ -47,6 +51,9 @@ const DEFAULTS: LfSettings = {
   emailDailyLimit: 40,
   autoEmailFollowUps: 0,
   noReplyDays: 7,
+  stuckRepliedDays: 2,
+  stuckMeetingDays: 3,
+  stuckProposalDays: 7,
 };
 
 /** Lead Finder settings (Setting rows in the "Lead Finder" group, keys lfXxx). */
@@ -56,9 +63,16 @@ export async function getLfSettings(): Promise<LfSettings> {
   for (const r of rows) {
     const key = (r.key.slice(2, 3).toLowerCase() + r.key.slice(3)) as keyof LfSettings;
     const n = Number(r.value);
-    if (key in s && Number.isFinite(n)) s[key] = n;
+    if (key in s && r.type !== "text" && Number.isFinite(n)) s[key] = n;
   }
   return s;
+}
+
+/** Text settings (links, not numbers). */
+export async function getLfTexts() {
+  const rows = await prisma.setting.findMany({ where: { group: "Lead Finder", type: "text" } });
+  const m = Object.fromEntries(rows.map((r) => [r.key, r.value.trim()]));
+  return { bookingLink: m.lfBookingLink || null };
 }
 
 export const googleKeyConfigured = () => !!process.env.GOOGLE_MAPS_API_KEY;

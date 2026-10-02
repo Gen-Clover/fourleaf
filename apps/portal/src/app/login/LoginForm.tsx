@@ -1,12 +1,12 @@
 "use client";
 
-import { useActionState } from "react";
 import { login } from "./actions";
+import { useFormAction } from "@genclover/ui/form-action";
 
 export default function LoginForm({ next }: { next: string }) {
-  const [state, action, pending] = useActionState(login, undefined);
+  const { state, pending, form } = useFormAction(login);
   return (
-    <form action={action} className="card space-y-4 p-6">
+    <form {...form} className="card space-y-4 p-6">
       <input type="hidden" name="next" value={next} />
       <div>
         <label className="label" htmlFor="email">Email</label>

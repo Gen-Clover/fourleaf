@@ -1,0 +1,22 @@
+{
+  "name": "@genclover/clients",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clients & Agreements: onboarding won deals, client records and contacts, NDA / MSA / SOW / change requests with versions and renewals",
+  "exports": {
+    "./app/*": "./src/app/*.tsx",
+    "./lib/*": "./src/lib/*.ts",
+    "./nav": "./src/nav.ts"
+  },
+  "dependencies": {
+    "@genclover/auth": "*",
+    "@genclover/db": "*",
+    "@genclover/ids": "*",
+    "@genclover/ui": "*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "next": "15.5.26",
+    "react": "19.1.0"
+  }
+}

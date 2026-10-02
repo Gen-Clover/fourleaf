@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader, Stat } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { getBuckets } from "../../lib/settings";
 import { PASS_THROUGH, getTreasurySettings, payrollPlan } from "../../lib/treasury";
@@ -10,7 +10,7 @@ import CommitmentForm from "./CommitmentForm";
 import { deleteCommitment } from "./actions";
 
 export default async function CommitmentsPage({ searchParams }: { searchParams: Promise<{ edit?: string }> }) {
-  await requireRole("EDITOR");
+  await requirePermission("finance.view");
   const sp = await searchParams;
   const [commitments, buckets, payroll, bills, s] = await Promise.all([
     prisma.commitment.findMany({ orderBy: [{ active: "desc" }, { nextDueDate: "asc" }] }),

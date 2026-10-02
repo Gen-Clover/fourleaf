@@ -28,14 +28,14 @@ export function SettingsForm({ settings }: { settings: SettingRow[] }) {
           </button>
         </div>
       </div>
-      <div className="grid gap-6 p-5 md:grid-cols-2">
+      <div className="gap-8 p-5 md:columns-2">
         {groups.map((g) => (
-          <fieldset key={g} className="space-y-3">
+          <fieldset key={g} className="mb-6 break-inside-avoid space-y-3">
             <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-fg">{g}</legend>
             {settings
               .filter((s) => s.group === g)
               .map((s) => (
-                <div key={s.key} className={`grid items-center gap-3 ${s.type === "text" ? "grid-cols-[1fr_16rem]" : "grid-cols-[1fr_9rem]"}`}>
+                <div key={s.key} className={`grid items-center gap-3 ${s.type === "text" ? "grid-cols-1 sm:grid-cols-[1fr_16rem]" : "grid-cols-[1fr_9rem]"}`}>
                   <div>
                     <div className="text-sm font-medium">{s.label}</div>
                     {s.description && <div className="text-xs text-neutral-500">{s.description}</div>}

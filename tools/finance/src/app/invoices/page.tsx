@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { PageHeader, Stat, StatusBadge } from "@genclover/ui";
-import { hasRole, requireUser } from "@genclover/auth";
+import { can, requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { AGING, agingBucket, fyLabel, fyStartYear, paidUsd } from "../../lib/finance";
-import { INVOICE_STATUSES, STATUS_LABEL, date, usd, usd0 } from "@genclover/ui/format";
+import { INVOICE_STATUSES, STATUS_LABEL, date, inr, money } from "@genclover/ui/format";
 
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<{ status?: string; client?: string }> }) {
   const user = await requireUser();
@@ -18,9 +18,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const fy = fyStartYear(new Date());
   const open = all.filter((i) => i.status === "SENT" || i.status === "PARTIAL");
   const balance = (i: (typeof all)[number]) => i.total - paidUsd(i.payments);
-  const outstanding = open.reduce((s, i) => s + balance(i), 0);
-  const overdue = open.filter((i) => agingBucket(i.dueDate) !== "Not due").reduce((s, i) => s + balance(i), 0);
-  const collectedFy = all.flatMap((i) => i.payments).filter((p) => fyStartYear(p.date) === fy).reduce((s, p) => s + p.amountUsd, 0);
+  // Totals across currencies are in ₹ (each invoice at its booking rate; received cash as it landed).
+  const outstanding = open.reduce((s, i) => s + balance(i) * i.fxRate, 0);
+  const overdue = open.filter((i) => agingBucket(i.dueDate) !== "Not due").reduce((s, i) => s + balance(i) * i.fxRate, 0);
+  const collectedFy = all.flatMap((i) => i.payments).filter((p) => fyStartYear(p.date) === fy).reduce((s, p) => s + p.inrReceived + p.tdsInr, 0);
   const drafts = all.filter((i) => i.status === "DRAFT");
 
   const qs = (status?: string) => `/invoices${status ? `?status=${status}` : ""}`;
@@ -29,14 +30,14 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Invoices"
-        subtitle="USD export invoices, payments received in ₹, and receivables."
-        actions={hasRole(user.role, "EDITOR") && <Link href="/invoices/new" className="btn-primary">+ New invoice</Link>}
+        subtitle="Export invoices (US$) and GST invoices (₹), payments received, TDS and receivables. Totals in ₹."
+        actions={can(user.role, "finance.edit") && <Link href="/invoices/new" className="btn-primary">+ New invoice</Link>}
       />
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Outstanding" value={usd0(outstanding)} hint={`${open.length} open invoice(s)`} accent />
-        <Stat label="Overdue" value={usd0(overdue)} hint="Past due date" />
-        <Stat label={`Collected ${fyLabel(fy)}`} value={usd0(collectedFy)} />
-        <Stat label="Drafts" value={drafts.length} hint={usd0(drafts.reduce((s, i) => s + i.total, 0))} />
+        <Stat label="Outstanding" value={inr(outstanding)} hint={`${open.length} open invoice(s)`} accent />
+        <Stat label="Overdue" value={inr(overdue)} hint="Past due date" />
+        <Stat label={`Collected ${fyLabel(fy)}`} value={inr(collectedFy)} hint="Received + TDS deducted" />
+        <Stat label="Drafts" value={drafts.length} hint={inr(drafts.reduce((s, i) => s + i.total * i.fxRate, 0))} />
       </div>
       <div className="mb-4 flex flex-wrap gap-2">
         <Link href={qs()} className={!sp.status ? "btn-primary btn-sm" : "btn-secondary btn-sm"}>All</Link>
@@ -62,9 +63,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                   <td className="whitespace-nowrap">{date(i.issueDate)}</td>
                   <td className="whitespace-nowrap">{date(i.dueDate)}</td>
                   <td><StatusBadge status={i.status} /></td>
-                  <td className="num">{usd(i.total)}</td>
-                  <td className="num">{usd(paidUsd(i.payments))}</td>
-                  <td className="num font-semibold">{isOpen ? usd(bal) : "—"}</td>
+                  <td className="num">{money(i.total, i.currency, 2)}</td>
+                  <td className="num">{money(paidUsd(i.payments), i.currency, 2)}</td>
+                  <td className="num font-semibold">{isOpen ? money(bal, i.currency, 2) : "—"}</td>
                   <td>{age && <span className={`badge ${age === "Not due" ? "bg-neutral-100 text-neutral-600" : age === "1–30" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>{age === "Not due" ? "Not due" : `${age} days`}</span>}</td>
                 </tr>
               );

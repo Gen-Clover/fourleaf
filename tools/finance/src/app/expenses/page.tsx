@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader, Stat, StatusBadge } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { can, requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { getBuckets, getParams } from "../../lib/settings";
 import { monthRange, ym, ymd } from "../../lib/finance";
@@ -8,9 +8,9 @@ import { date, inr, monthLabel, num } from "@genclover/ui/format";
 import ExpenseForm from "./ExpenseForm";
 import { deleteExpense, markExpensePaid } from "./actions";
 
-export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ month?: string; cat?: string; unpaid?: string; edit?: string }> }) {
-  const user = await requireRole("EDITOR");
-  const isAdmin = user.role === "ADMIN";
+export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ month?: string; cat?: string; unpaid?: string; edit?: string; held?: string }> }) {
+  const user = await requirePermission("finance.view");
+  const isAdmin = can(user.role, "finance.edit");
   const sp = await searchParams;
   const month = sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : sp.month === "all" ? null : ym(new Date());
   const range = month ? monthRange(month) : null;
@@ -25,14 +25,16 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       include: { category: true, project: { select: { id: true, code: true } }, invoiceLines: { select: { invoiceId: true }, take: 1 } },
     }),
-    prisma.expenseCategory.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
+    prisma.expenseCategory.findMany({ orderBy: { sortOrder: "asc" } }),
     prisma.project.findMany({ where: { status: { notIn: ["CANCELLED"] } }, orderBy: { code: "desc" }, select: { id: true, code: true, name: true } }),
     getBuckets(),
     getParams(),
     prisma.expense.aggregate({ where: { paidOn: null }, _sum: { amountInr: true }, _count: true }),
     sp.edit ? prisma.expense.findUnique({ where: { id: sp.edit } }) : null,
   ]);
-  const bucketName = (key: string | null) => (key == null ? "Pass-through" : (buckets.find((b) => b.key === key)?.name ?? `${key} (removed bucket)`));
+  const awaiting = new Set((await prisma.approval.findMany({ where: { type: "EXPENSE", status: "PENDING" }, select: { entityId: true } })).map((a) => a.entityId));
+  const bucketName = (key: string | null) =>
+    key == null ? "Pass-through" : key === "gst" ? "GST to the government" : (buckets.find((b) => b.key === key)?.name ?? `${key} (removed bucket)`);
 
   const total = expenses.reduce((s, e) => s + e.amountInr, 0);
   const gst = expenses.reduce((s, e) => s + e.gstInr, 0);
@@ -53,7 +55,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Expenses" subtitle="Actual spend in ₹, mapped to the 65/10/25 buckets. Payroll runs from People land here too." />
+      <PageHeader title="Expenses" subtitle="Actual spend in ₹, by subcategory and allocation bucket. Approved pay runs land here too." />
+      {sp.held && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">That expense is at or above the approval limit: it has been sent to <Link className="underline" href="/approvals">Approvals</Link>. Mark it paid once a second person approves it.</div>}
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label={month ? `Spend ${monthLabel(month)}` : "Spend (all time)"} value={inr(total)} hint={`${expenses.length} expense(s) · GST ${inr(gst)}`} accent />
         <Stat label="Unpaid (payables)" value={inr(payables._sum.amountInr ?? 0)} hint={<Link href={qs({ unpaid: "1", month: "all" })} className="underline">{payables._count} bill(s)</Link>} />
@@ -65,7 +68,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         <ExpenseForm
           key={editing?.id ?? "new"}
           expense={editing ? { ...editing, date: ymd(editing.date), paidOn: editing.paidOn ? ymd(editing.paidOn) : null } : null}
-          categories={categories.map((c) => ({ id: c.id, name: c.name, bucket: bucketName(c.bucketKey) }))}
+          categories={categories.filter((c) => c.active || c.id === editing?.categoryId).map((c) => ({ id: c.id, name: c.name, bucketKey: c.bucketKey, bucket: bucketName(c.bucketKey) }))}
           projects={projects.map((pr) => ({ id: pr.id, label: `${pr.code} ${pr.name}` }))}
           defaultFx={p.fxRate}
           today={ymd(new Date())}
@@ -78,7 +81,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         {month && <Link href={qs({ month: prevMonth(month, 1) })} className="btn-secondary btn-sm">→</Link>}
         <Link href={qs({ month: month ? "all" : undefined })} className="btn-secondary btn-sm">{month ? "All months" : "This month"}</Link>
         <Link href={qs({ unpaid: sp.unpaid ? undefined : "1" })} className={sp.unpaid ? "btn-primary btn-sm" : "btn-secondary btn-sm"}>Unpaid only</Link>
-        <form action="/expenses" className="flex items-center gap-1">
+        <form action="/expenses" className="flex max-w-full min-w-0 flex-wrap items-center gap-1 [&_select]:max-w-full [&_select]:min-w-0">
           {sp.month && <input type="hidden" name="month" value={sp.month} />}
           {sp.unpaid && <input type="hidden" name="unpaid" value="1" />}
           <select name="cat" defaultValue={sp.cat ?? ""} className="input-sm">
@@ -110,7 +113,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 </td>
                 <td className="space-x-1 whitespace-nowrap">
                   <Link href={qs({ edit: e.id })} className="btn-secondary btn-sm">Edit</Link>
-                  {!e.paidOn && <form action={markExpensePaid.bind(null, e.id)} className="inline"><button className="btn-secondary btn-sm">Mark paid</button></form>}
+                  {!e.paidOn && awaiting.has(e.id) && <span className="badge bg-amber-50 text-amber-700">awaiting approval</span>}
+                  {!e.paidOn && !awaiting.has(e.id) && <form action={markExpensePaid.bind(null, e.id)} className="inline"><button className="btn-secondary btn-sm">Mark paid</button></form>}
                   {isAdmin && !e.invoiceLines.length && <form action={deleteExpense.bind(null, e.id)} className="inline"><button className="btn-danger btn-sm">✕</button></form>}
                 </td>
               </tr>

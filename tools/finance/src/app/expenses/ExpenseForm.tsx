@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { BUCKET_GUIDE } from "../../lib/allocation";
 import { saveExpense } from "./actions";
+import { useFormAction } from "@genclover/ui/form-action";
 
 export type ExpenseDto = {
   id: string;
@@ -27,19 +29,23 @@ export default function ExpenseForm({
   today,
 }: {
   expense: ExpenseDto | null;
-  categories: { id: string; name: string; bucket: string }[];
+  categories: { id: string; name: string; bucketKey: string | null; bucket: string }[];
   projects: { id: string; label: string }[];
   defaultFx: number;
   today: string;
 }) {
-  const [state, action, pending] = useActionState(saveExpense.bind(null, expense?.id ?? null), undefined);
+  const { state, pending, form } = useFormAction(saveExpense.bind(null, expense?.id ?? null), { resetOnSuccess: !expense?.id });
   const [currency, setCurrency] = useState(expense?.currency ?? "INR");
   const [paid, setPaid] = useState(expense ? !!expense.paidOn : true);
   const [catId, setCatId] = useState(expense?.categoryId ?? "");
-  const isPassThrough = categories.find((c) => c.id === catId)?.bucket === "Pass-through";
+  const picked = categories.find((c) => c.id === catId);
+  const isPassThrough = picked?.bucket === "Pass-through";
+  const guide = picked?.bucketKey ? BUCKET_GUIDE[picked.bucketKey] : undefined;
+  // Subcategories grouped under their bucket, in bucket order.
+  const groups = [...new Set(categories.map((c) => c.bucket))].map((b) => ({ bucket: b, items: categories.filter((c) => c.bucket === b) }));
 
   return (
-    <form action={action} className="card space-y-4 p-5">
+    <form {...form} className="card space-y-4 p-5">
       <div className="flex items-center justify-between">
         <div className="card-t">{expense ? "Edit expense" : "Add expense"}</div>
         {expense && <Link href="/expenses" className="text-sm text-neutral-500 hover:underline">Cancel</Link>}
@@ -48,11 +54,16 @@ export default function ExpenseForm({
         <div><label className="label">Date *</label><input className="input" type="date" name="date" defaultValue={expense?.date ?? today} required /></div>
         <div className="md:col-span-2"><label className="label">Vendor / payee *</label><input className="input" name="vendor" defaultValue={expense?.vendor ?? ""} required /></div>
         <div className="md:col-span-3">
-          <label className="label">Category → bucket *</label>
+          <label className="label">What was it for? (subcategory) *</label>
           <select className="input" name="categoryId" value={catId} onChange={(e) => setCatId(e.target.value)} required>
             <option value="">Select…</option>
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name} → {c.bucket}</option>)}
+            {groups.map((g) => (
+              <optgroup key={g.bucket} label={g.bucket}>
+                {g.items.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </optgroup>
+            ))}
           </select>
+          {picked && <p className="mt-1 text-xs text-neutral-500">Bucket: <b>{picked.bucket}</b>{guide ? ` · ${guide.purpose}. Not for: ${guide.exclusions}.` : ""}</p>}
         </div>
         <div>
           <label className="label">Currency</label>
@@ -77,7 +88,7 @@ export default function ExpenseForm({
           {paid ? <input className="input" type="date" name="paidOn" defaultValue={expense?.paidOn ?? today} /> : <><input className="input" disabled value="Unpaid (payable)" /><input type="hidden" name="paidOn" value="" /></>}
         </div>
       </div>
-      {isPassThrough && <p className="text-xs text-amber-700">Pass-through: excluded from the 65/10/25 budgets and added at cost to the project&apos;s next invoice.</p>}
+      {isPassThrough && <p className="text-xs text-amber-700">Pass-through: outside the allocation budgets and added at cost to the project&apos;s next invoice.</p>}
       <div className="flex items-center gap-3">
         <button className="btn-primary" disabled={pending}>{pending ? "Saving…" : expense ? "Save changes" : "Add expense"}</button>
         {state && <span className={`text-sm ${state.ok ? "text-emerald-700" : "text-red-600"}`}>{state.message}</span>}

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Chakra_Petch, Inter } from "next/font/google";
 import { themeScript } from "@genclover/ui/theme-toggle";
+import ResponsiveTables from "@/components/ResponsiveTables";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], display: "swap" });
@@ -17,7 +18,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className={`${inter.variable} ${chakra.variable} font-sans antialiased`}>{children}</body>
+      <body className={`${inter.variable} ${chakra.variable} font-sans antialiased`}>
+        {children}
+        <ResponsiveTables />
+      </body>
     </html>
   );
 }

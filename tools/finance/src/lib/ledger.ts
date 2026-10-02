@@ -2,12 +2,13 @@ import "server-only";
 import { prisma } from "@genclover/db";
 import { getBuckets, getParams, parseSnapshot } from "./settings";
 import { split } from "./calc";
-import { agingBucket, bucketVariance, monthRange, monthsBetween, paidUsd, paymentFx, ym } from "./finance";
+import { agingBucket, bucketVariance, fxFor, monthRange, monthsBetween, paidUsd, paymentFx, ym } from "./finance";
 
 /**
  * Accrual P&L, cash flow and project profitability in ₹ for months [fromMonth, toMonth].
- * - Service revenue: monthly billing records by month, at the invoice's booking FX (or the settings FX if not yet invoiced).
- * - Pass-through: recovered on invoices (by issue month) vs cost (by expense date) — outside the 65/10/25 model.
+ * - Service revenue: monthly billing records by month, at the invoice's booking FX (or the settings FX if not yet
+ *   invoiced; ₹ projects at 1), plus fixed-price milestone invoices by issue month. GST is never revenue.
+ * - Pass-through: recovered on invoices (by issue month) vs cost (by expense date) — outside the allocation model.
  * - Spend: expenses by date, mapped to buckets through their category. Bank charges on receipts count as Corporate Ops.
  * - FX: realised gain/loss on receipts (payment month).
  * - Project cost: timesheet hours × snapshotted ₹/hr, plus non-pass-through expenses tagged to the project.
@@ -16,12 +17,12 @@ export async function ledger(fromMonth: string, toMonth: string) {
   const months = monthsBetween(fromMonth, toMonth);
   const from = monthRange(fromMonth).from;
   const to = monthRange(toMonth).to;
-  const [p, buckets, records, expenses, payments, ptLines, entries] = await Promise.all([
+  const [p, buckets, records, expenses, payments, ptLines, entries, msLines] = await Promise.all([
     getParams(),
     getBuckets(),
     prisma.monthlyRecord.findMany({
       where: { month: { gte: fromMonth, lte: toMonth } },
-      include: { invoice: { select: { fxRate: true, status: true } }, project: { select: { id: true, code: true, name: true, allocationSnapshot: true, client: { select: { id: true, name: true } } } } },
+      include: { invoice: { select: { fxRate: true, status: true } }, project: { select: { id: true, code: true, name: true, currency: true, allocationSnapshot: true, client: { select: { id: true, name: true } } } } },
     }),
     prisma.expense.findMany({ where: { date: { gte: from, lt: to } }, include: { category: true } }),
     prisma.payment.findMany({ where: { date: { gte: from, lt: to } }, include: { invoice: { select: { fxRate: true, clientId: true } } } }),
@@ -30,6 +31,10 @@ export async function ledger(fromMonth: string, toMonth: string) {
       include: { invoice: { select: { fxRate: true, issueDate: true, projectId: true } } },
     }),
     prisma.timeEntry.findMany({ where: { date: { gte: from, lt: to } }, select: { projectId: true, date: true, hours: true, billable: true, costRateInr: true } }),
+    prisma.invoiceLine.findMany({
+      where: { kind: "MILESTONE", invoice: { status: { in: ["SENT", "PARTIAL", "PAID"] }, issueDate: { gte: from, lt: to } } },
+      include: { invoice: { select: { fxRate: true, currency: true, issueDate: true, projectId: true, project: { select: { id: true, code: true, name: true, allocationSnapshot: true, client: { select: { name: true } } } } } } },
+    }),
   ]);
 
   const corpKey = buckets.find((b) => b.key === "corpOps")?.key ?? buckets.find((b) => b.category === "CORPORATE" && !b.isProfit)?.key ?? "unmapped";
@@ -47,16 +52,32 @@ export async function ledger(fromMonth: string, toMonth: string) {
 
   for (const r of records) {
     const m = byMonth.get(r.month)!;
-    const fx = r.invoice && r.invoice.status !== "VOID" ? r.invoice.fxRate : p.fxRate;
+    const fx = r.invoice && r.invoice.status !== "VOID" ? r.invoice.fxRate : fxFor(r.project.currency, p.fxRate);
     const inr = r.revenue * fx;
-    m.revenueUsd += r.revenue;
+    if (r.project.currency !== "INR") m.revenueUsd += r.revenue;
     m.revenueInr += inr;
     const snap = parseSnapshot(r.project.allocationSnapshot);
     for (const l of split(inr, snap).lines) add(m.budget, l.key, l.amount);
     const x = proj(r.project.id, { code: r.project.code, name: r.project.name, client: r.project.client.name, deliveryPct: split(100, snap).delivery });
-    x.revenueUsd += r.revenue;
+    if (r.project.currency !== "INR") x.revenueUsd += r.revenue;
     x.revenueInr += inr;
     x.hoursBilled += r.hours;
+  }
+  // Fixed-price milestones: revenue in the month the invoice is issued.
+  for (const l of msLines) {
+    const m = byMonth.get(ym(l.invoice.issueDate));
+    if (!m) continue;
+    const inr = l.amount * l.invoice.fxRate;
+    if (l.invoice.currency !== "INR") m.revenueUsd += l.amount;
+    m.revenueInr += inr;
+    const pr = l.invoice.project;
+    if (pr) {
+      const snap = parseSnapshot(pr.allocationSnapshot);
+      for (const s of split(inr, snap).lines) add(m.budget, s.key, s.amount);
+      const x = proj(pr.id, { code: pr.code, name: pr.name, client: pr.client.name, deliveryPct: split(100, snap).delivery });
+      if (l.invoice.currency !== "INR") x.revenueUsd += l.amount;
+      x.revenueInr += inr;
+    }
   }
   for (const e of expenses) {
     const m = byMonth.get(ym(e.date));

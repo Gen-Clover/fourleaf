@@ -41,7 +41,17 @@ export async function getInvoiceSettings() {
     bank: m.bankDetails ?? "",
     prefix: m.invoicePrefix || "GCI",
     termsDays: Number(m.paymentTermsDays ?? 30) || 30,
+    state: m.companyState ?? "",
+    pan: m.companyPan ?? "",
+    gstRate: Number(m.gstRatePct ?? 18) || 0,
   };
+}
+
+/** Pay runs, approvals and costing. */
+export async function getPaySettings() {
+  const rows = await prisma.setting.findMany({ where: { group: "Pay & approvals" } });
+  const m = Object.fromEntries(rows.map((r) => [r.key, Number(r.value)]));
+  return { tdsContractorPct: m.tdsContractorPct ?? 10, approvalLimitInr: m.approvalLimitInr ?? 25000, overheadPerHourInr: m.overheadPerHourInr ?? 0 };
 }
 
 export async function getBuckets(): Promise<Bucket[]> {

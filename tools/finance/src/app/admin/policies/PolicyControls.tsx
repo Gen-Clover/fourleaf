@@ -3,9 +3,35 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { STAGES } from "@genclover/ui/format";
-import { activatePolicy, saveCurrentAsPolicy } from "./actions";
+import { activatePolicy, reapplyAllocation, saveCurrentAsPolicy } from "./actions";
 
 type Msg = { ok: boolean; message: string } | null;
+
+/** Apply the live allocation to existing projects' snapshots and to past receipts' fund split. */
+export function ReapplyButton({ policy }: { policy: string }) {
+  const router = useRouter();
+  const [msg, setMsg] = useState<Msg>(null);
+  const [pending, start] = useTransition();
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        className="btn-secondary btn-sm"
+        disabled={pending}
+        onClick={() => {
+          if (!confirm(`Apply "${policy}" to every existing project and re-split every receipt already recorded? Fund balances change accordingly; transfers and spends stay as they are.`)) return;
+          start(async () => {
+            const r = await reapplyAllocation();
+            setMsg(r ?? null);
+            if (r?.ok) router.refresh();
+          });
+        }}
+      >
+        {pending ? "Applying…" : "Apply to existing projects and receipts"}
+      </button>
+      {msg && <span className={`text-xs ${msg.ok ? "text-emerald-700" : "text-red-600"}`}>{msg.message}</span>}
+    </div>
+  );
+}
 
 export function ActivateButton({ id, name }: { id: string; name: string }) {
   const router = useRouter();

@@ -10,13 +10,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Role: ADMIN | EDITOR | VIEWER
+/// Role: OWNER | CFO | SALES | ONBOARDING | DELIVERY | TEAM (packages/auth/src/access.ts)
 model User {
   id           String     @id @default(cuid()) @map("_id")
   name         String
   email        String     @unique
   passwordHash String
-  role         String     @default("VIEWER")
+  role         String     @default("TEAM")
   active       Boolean    @default(true)
   lastLoginAt  DateTime?
   createdAt    DateTime   @default(now())
@@ -39,24 +39,40 @@ model Setting {
 }
 
 model Client {
-  id             String    @id @default(cuid()) @map("_id")
-  number         String    @unique // Client ID, GC-YYYY-NNNN (system, never changes)
-  code           String    @unique // Client code, e.g. ABR (chosen at onboarding, then locked): project IDs, Jira, folders, emails
-  name           String
-  contactName    String?
-  email          String?
-  phone          String?
-  country        String?   @default("USA")
-  city           String?
-  timezone       String?
-  website        String?
-  billingAddress String?
-  notes          String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  projects       Project[]
-  invoices       Invoice[]
-  leads          Lead[]
+  id               String          @id @default(cuid()) @map("_id")
+  number           String          @unique // Client ID, GC-YYYY-NNNN (system, never changes)
+  code             String          @unique // Client code, e.g. ABR (chosen at onboarding, then locked): project IDs, Jira, folders, emails
+  name             String
+  contactName      String?
+  email            String?
+  phone            String?
+  country          String?         @default("USA")
+  city             String?
+  timezone         String?
+  website          String?
+  billingAddress   String?
+  notes            String?
+  // Tax and billing (India GST; export clients bill in USD under LUT)
+  legalName        String?
+  gstin            String?
+  pan              String?
+  state            String? // Indian state for place of supply, e.g. Punjab
+  currency         String          @default("USD") // INR | USD
+  paymentTermsDays Int?
+  industry         String?
+  // Onboarding (Clients & Agreements tool). status: ONBOARDING | ACTIVE | INACTIVE
+  status           String          @default("ACTIVE")
+  onboardedAt      DateTime?
+  accountManager   String?
+  checklist        String? // JSON { itemKey: true }
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  projects         Project[]
+  invoices         Invoice[]
+  leads            Lead[]
+  contacts         ClientContact[]
+  agreements       Agreement[]
+  opportunities    Opportunity[]
 }
 
 model AuditLog {

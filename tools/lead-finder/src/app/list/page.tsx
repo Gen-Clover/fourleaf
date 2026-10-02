@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { PageHeader } from "@genclover/ui";
-import { hasRole, requireUser } from "@genclover/auth";
+import { can, requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
+import { NO_DEAL } from "../../lib/dealAccess";
 import { baseWhere, listWhere, orderBy, parseFilters, scoreField } from "../../lib/query";
 import { MARKETS, MARKET_KEYS } from "../../lib/markets";
 import { SERVICES } from "../../lib/services";
@@ -15,19 +16,20 @@ const PAGE_SIZE = 50;
 export default async function LeadListPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const f = parseFilters(sp);
+  const f = parseFilters(sp, user.id);
   const settings = await getLfSettings();
-  const base = baseWhere(f, settings.hotScore, settings.warmScore);
-  const where = listWhere(f, settings.hotScore, settings.warmScore);
+  const base = baseWhere(f, settings);
+  const where = listWhere(f, settings);
 
-  const [total, leads, niches, search, tabCounts, withBranches] = await Promise.all([
+  const [total, leads, niches, search, tabCounts, withBranches, users] = await Promise.all([
     prisma.lead.count({ where }),
-    prisma.lead.findMany({ where, orderBy: orderBy(f), skip: (f.page - 1) * PAGE_SIZE, take: PAGE_SIZE }),
+    prisma.lead.findMany({ where, omit: NO_DEAL, orderBy: orderBy(f), skip: (f.page - 1) * PAGE_SIZE, take: PAGE_SIZE }),
     prisma.leadNiche.findMany({ orderBy: { sortOrder: "asc" }, select: { key: true, label: true } }),
     f.search ? prisma.leadSearch.findUnique({ where: { id: f.search }, select: { nicheLabel: true, areaLabel: true } }) : null,
     Promise.all([prisma.lead.count({ where: base }), ...SERVICES.map((s) => prisma.lead.count({ where: { AND: [base, { [s.field]: { gt: 0 } }] } }))]),
     // Same filters with every branch shown: the difference is how many other branches the list hides.
-    f.branches ? null : prisma.lead.count({ where: listWhere({ ...f, branches: "show" }, settings.hotScore, settings.warmScore) }),
+    f.branches ? null : prisma.lead.count({ where: listWhere({ ...f, branches: "show" }, settings) }),
+    prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   const hiddenBranches = withBranches == null ? 0 : withBranches - total;
 
@@ -53,8 +55,8 @@ export default async function LeadListPage({ searchParams }: { searchParams: Pro
         actions={
           <>
             <MarketToggle markets={MARKET_KEYS.map((k) => ({ key: k, label: MARKETS[k].label }))} />
-            {hasRole(user.role, "EDITOR") && <a href={`/api/leads/export${exportQuery ? `?${exportQuery}` : ""}`} className="btn-secondary">Export CSV</a>}
-            {hasRole(user.role, "EDITOR") && <Link href="/leads/find" className="btn-primary">+ New search</Link>}
+            {can(user.role, "leads.edit") && <a href={`/api/leads/export${exportQuery ? `?${exportQuery}` : ""}`} className="btn-secondary">Export CSV</a>}
+            {can(user.role, "leads.edit") && <Link href="/leads/find" className="btn-primary">+ New search</Link>}
           </>
         }
       />
@@ -75,12 +77,15 @@ export default async function LeadListPage({ searchParams }: { searchParams: Pro
       </nav>
 
       <FilterBar
-        filters={{ stage: f.stage, temp: f.temp, niche: f.niche, site: f.site, q: f.q, followUp: f.followUp, sort: f.sort, search: f.search, gFrom: f.gFrom, gTo: f.gTo, gOlder: f.gOlder, branches: f.branches, claude: f.claude }}
+        filters={{ stage: f.stage, temp: f.temp, niche: f.niche, site: f.site, q: f.q, followUp: f.followUp, sort: f.sort, search: f.search, gFrom: f.gFrom, gTo: f.gTo, gOlder: f.gOlder, branches: f.branches, claude: f.claude, owner: f.owner, stuck: f.stuck }}
         niches={niches}
+        users={users}
+        meId={user.id}
       />
 
       <LeadTable
-        canEdit={hasRole(user.role, "EDITOR")}
+        canEdit={can(user.role, "leads.edit")}
+        users={users}
         showService={!f.service}
         query={exportQuery}
         total={total}
@@ -105,6 +110,7 @@ export default async function LeadListPage({ searchParams }: { searchParams: Pro
           claudeFit: l.claudeFit,
           googleFetchedAt: l.googleFetchedAt?.toISOString() ?? null,
           market: l.market,
+          ownerName: l.ownerName,
         }))}
       />
 

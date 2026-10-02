@@ -17,6 +17,7 @@ export function Composer({
   options,
   whatsapp,
   email,
+  linkedin = null,
   emailFirst,
   smtp,
   doNotContact,
@@ -27,6 +28,8 @@ export function Composer({
   options: MessageOption[];
   whatsapp: string | null;
   email: string | null;
+  /** LinkedIn profile to message (company accounts): the text is copied, the profile opens, then they confirm. */
+  linkedin?: string | null;
   emailFirst: boolean;
   smtp: boolean;
   doNotContact: boolean;
@@ -37,16 +40,16 @@ export function Composer({
   const current = options.find((o) => o.key === key);
   const [text, setText] = useState(current?.text ?? "");
   const [subject, setSubject] = useState(current?.subject ?? "");
-  const [channel, setChannel] = useState<"WHATSAPP" | "EMAIL">(emailFirst && email ? "EMAIL" : whatsapp ? "WHATSAPP" : email ? "EMAIL" : "WHATSAPP");
+  const [channel, setChannel] = useState<"WHATSAPP" | "EMAIL" | "LINKEDIN">(emailFirst && email ? "EMAIL" : whatsapp ? "WHATSAPP" : email ? "EMAIL" : linkedin ? "LINKEDIN" : "WHATSAPP");
   const [msg, setMsg] = useState<{ ok: boolean; message: string } | null>(null);
   const [copied, setCopied] = useState(false);
   // WhatsApp and your email app can't tell us whether you pressed send, so we ask before logging it.
-  const [awaiting, setAwaiting] = useState<"WHATSAPP" | "EMAIL" | null>(null);
+  const [awaiting, setAwaiting] = useState<"WHATSAPP" | "EMAIL" | "LINKEDIN" | null>(null);
   const [pending, start] = useTransition();
   if (!current) return <p className="text-sm text-neutral-500">No opportunity found yet. The message appears once the website check finds something to offer.</p>;
   const blocked = doNotContact || !canEdit;
 
-  const log = (type: "WHATSAPP" | "EMAIL") =>
+  const log = (type: "WHATSAPP" | "EMAIL" | "LINKEDIN") =>
     start(async () => {
       const r = await logActivity(leadId, { type, text: type === "EMAIL" ? `${subject}\n\n${text}` : text, service: current.service });
       setMsg(r ?? null);
@@ -83,7 +86,7 @@ export function Composer({
         </div>
       )}
       <div className="flex gap-1 text-xs" role="radiogroup" aria-label="Channel">
-        {(["WHATSAPP", "EMAIL"] as const).map((c) => (
+        {(["WHATSAPP", "EMAIL", "LINKEDIN"] as const).filter((c) => c !== "LINKEDIN" || linkedin).map((c) => (
           <button
             key={c}
             type="button"
@@ -92,7 +95,7 @@ export function Composer({
             onClick={() => setChannel(c)}
             className={`rounded-md px-2.5 py-1 ${channel === c ? "bg-neutral-100 font-medium text-neutral-900" : "text-neutral-500 hover:text-neutral-900"}`}
           >
-            {c === "WHATSAPP" ? "WhatsApp" : "Email"}
+            {c === "WHATSAPP" ? "WhatsApp" : c === "EMAIL" ? "Email" : "LinkedIn"}
           </button>
         ))}
       </div>
@@ -110,6 +113,20 @@ export function Composer({
             ) : (
               <span className="text-xs text-neutral-500">No phone number for WhatsApp.</span>
             ))}
+          {channel === "LINKEDIN" && linkedin && (
+            <a
+              className={`btn-primary btn-sm ${blocked || pending ? "pointer-events-none opacity-50" : ""}`}
+              href={linkedin}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => {
+                navigator.clipboard.writeText(text).catch(() => undefined);
+                setAwaiting("LINKEDIN");
+              }}
+            >
+              Copy &amp; open LinkedIn
+            </a>
+          )}
           {channel === "EMAIL" &&
             (!email ? (
               <span className="text-xs text-neutral-500">No email address. Add one under Contact details.</span>
@@ -138,7 +155,7 @@ export function Composer({
       )}
       {awaiting && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
-          <span>Did you send it {awaiting === "WHATSAPP" ? "in WhatsApp" : "from your email app"}? It&apos;s only logged (and follow-ups scheduled) when you confirm.</span>
+          <span>Did you send it {awaiting === "WHATSAPP" ? "in WhatsApp" : awaiting === "LINKEDIN" ? "on LinkedIn (message pasted)" : "from your email app"}? It&apos;s only logged (and follow-ups scheduled) when you confirm.</span>
           <button type="button" className="btn-primary btn-sm" disabled={pending} onClick={() => log(awaiting)}>
             Yes, I sent it
           </button>

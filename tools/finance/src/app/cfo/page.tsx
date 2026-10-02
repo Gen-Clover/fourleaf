@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { PageHeader, Stat } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { cfoSnapshot, activePolicyName } from "../../lib/treasury";
 import { LEVELS, computeAlerts } from "../../lib/alerts";
 import { OBLIGATION_KINDS, date, inr, monthLabel } from "@genclover/ui/format";
 import { FlowChart } from "../reports/FinanceCharts";
 
 export default async function CfoPage() {
-  await requireRole("EDITOR");
+  await requirePermission("finance.view");
   const [snap, policy] = await Promise.all([cfoSnapshot(), activePolicyName()]);
   const alerts = await computeAlerts(snap);
   const s = snap.settings;

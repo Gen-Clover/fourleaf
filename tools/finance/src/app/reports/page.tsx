@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { PageHeader, Stat } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { ledger, receivables } from "../../lib/ledger";
 import { AGING, fyLabel, fyMonths, fyStartYear } from "../../lib/finance";
-import { date, inr, monthLabel, pct, usd, usd0 } from "@genclover/ui/format";
+import { date, inr, monthLabel, pct, usd0, money } from "@genclover/ui/format";
 import { FlowChart } from "./FinanceCharts";
 
 const TABS = [
@@ -14,7 +14,7 @@ const TABS = [
 ];
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ tab?: string; fy?: string }> }) {
-  await requireRole("EDITOR");
+  await requirePermission("finance.view");
   const sp = await searchParams;
   const tab = TABS.some((t) => t.key === sp.tab) ? sp.tab! : "pnl";
   const current = fyStartYear(new Date());
@@ -46,7 +46,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <Stat label="Net cash" value={inr(T.cashIn - T.cashOut)} hint={`In ${inr(T.cashIn)} · out ${inr(T.cashOut)}`} />
       </div>
 
-      <div className="mb-5 flex gap-1 overflow-x-auto border-b border-neutral-200">
+      <div className="mb-5 flex flex-wrap gap-x-1 border-b border-neutral-200">
         {TABS.map((t) => (
           <Link key={t.key} href={link({ tab: t.key })} className={`-mb-px border-b-2 px-4 py-2 text-sm whitespace-nowrap ${tab === t.key ? "border-brand font-semibold text-brand-fg" : "border-transparent text-neutral-600 hover:text-ink"}`}>{t.label}</Link>
         ))}
@@ -56,7 +56,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <div className="space-y-6">
           <FlowChart title="Monthly revenue, spend and net profit" names={["Revenue (incl. pass-through)", "Spend (incl. pass-through)", "Net profit"]} data={L.months.map((m) => ({ label: monthLabel(m.month), a: m.revenueInr + m.ptRecoveredInr, b: m.spendTotal + m.ptCostInr, c: m.net }))} />
           <div className="card overflow-x-auto">
-            <div className="card-h"><div className="card-t">Budget vs actual — 65 / 10 / 25 model</div><span className="text-xs text-neutral-500">Budget = revenue × each project&apos;s allocation snapshot</span></div>
+            <div className="card-h"><div className="card-t">Budget vs actual — allocation model</div><span className="text-xs text-neutral-500">Budget = revenue × each project&apos;s allocation snapshot</span></div>
             <table className="tbl">
               <thead><tr><th>Bucket</th><th className="num">Plan %</th><th className="num">Budget</th><th className="num">Actual</th><th className="num">Actual %</th><th className="num">Variance</th><th>Use</th></tr></thead>
               <tbody>
@@ -125,7 +125,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             <tbody>
               {L.projects.map((x) => (
                 <tr key={x.id}>
-                  <td><Link href={`/projects/${x.id}?tab=team`} className="text-brand-fg hover:underline"><span className="font-mono text-xs">{x.code}</span> {x.name}</Link></td>
+                  <td><Link href={`/finance/projects/${x.id}?tab=profit`} className="text-brand-fg hover:underline"><span className="font-mono text-xs">{x.code}</span> {x.name}</Link></td>
                   <td>{x.client}</td>
                   <td className="num">{inr(x.revenueInr)}<div className="text-xs text-neutral-500">{usd0(x.revenueUsd)}</div></td>
                   <td className="num">{x.hoursBilled} / {x.hoursLogged}</td>
@@ -182,24 +182,24 @@ async function ReceivablesTab() {
   const byClient = new Map<string, { name: string; buckets: Record<string, number>; total: number }>();
   for (const i of open) {
     const c = byClient.get(i.client.id) ?? { name: i.client.name, buckets: {}, total: 0 };
-    c.buckets[i.aging] = (c.buckets[i.aging] ?? 0) + i.balance;
-    c.total += i.balance;
+    c.buckets[i.aging] = (c.buckets[i.aging] ?? 0) + i.balance * i.fxRate;
+    c.total += i.balance * i.fxRate;
     byClient.set(i.client.id, c);
   }
-  const col = (a: string) => open.filter((i) => i.aging === a).reduce((s, i) => s + i.balance, 0);
+  const col = (a: string) => open.filter((i) => i.aging === a).reduce((s, i) => s + i.balance * i.fxRate, 0);
   return (
     <div className="space-y-6">
       <div className="card overflow-x-auto">
-        <div className="card-h"><div className="card-t">Aging by client (US$, days past due)</div></div>
+        <div className="card-h"><div className="card-t">Aging by client (₹ at booking rate, days past due)</div></div>
         <table className="tbl">
           <thead><tr><th>Client</th>{AGING.map((a) => <th key={a} className="num">{a}</th>)}<th className="num">Total</th></tr></thead>
           <tbody>
             {[...byClient.values()].sort((a, b) => b.total - a.total).map((c) => (
-              <tr key={c.name}><td>{c.name}</td>{AGING.map((a) => <td key={a} className={`num ${a !== "Not due" && c.buckets[a] ? "text-red-600" : ""}`}>{c.buckets[a] ? usd(c.buckets[a]) : "—"}</td>)}<td className="num font-semibold">{usd(c.total)}</td></tr>
+              <tr key={c.name}><td>{c.name}</td>{AGING.map((a) => <td key={a} className={`num ${a !== "Not due" && c.buckets[a] ? "text-red-600" : ""}`}>{c.buckets[a] ? inr(c.buckets[a]) : "—"}</td>)}<td className="num font-semibold">{inr(c.total)}</td></tr>
             ))}
             {open.length === 0 && <tr><td colSpan={AGING.length + 2} className="py-8 text-center text-neutral-500">Nothing outstanding.</td></tr>}
           </tbody>
-          {open.length > 0 && <tfoot><tr><td>TOTAL</td>{AGING.map((a) => <td key={a} className="num">{usd(col(a))}</td>)}<td className="num">{usd(open.reduce((s, i) => s + i.balance, 0))}</td></tr></tfoot>}
+          {open.length > 0 && <tfoot><tr><td>TOTAL</td>{AGING.map((a) => <td key={a} className="num">{inr(col(a))}</td>)}<td className="num">{inr(open.reduce((s, i) => s + i.balance * i.fxRate, 0))}</td></tr></tfoot>}
         </table>
       </div>
       <div className="card overflow-x-auto">
@@ -211,7 +211,7 @@ async function ReceivablesTab() {
               <tr key={i.id}>
                 <td><Link href={`/invoices/${i.id}`} className="font-mono text-xs text-brand-fg hover:underline">{i.number}</Link></td>
                 <td>{i.client.name}</td><td className="font-mono text-xs">{i.project?.code ?? "—"}</td>
-                <td>{date(i.dueDate)}</td><td>{i.aging}</td><td className="num">{usd(i.total)}</td><td className="num font-semibold">{usd(i.balance)}</td>
+                <td>{date(i.dueDate)}</td><td>{i.aging}</td><td className="num">{money(i.total, i.currency, 2)}</td><td className="num font-semibold">{money(i.balance, i.currency, 2)}</td>
               </tr>
             ))}
           </tbody>

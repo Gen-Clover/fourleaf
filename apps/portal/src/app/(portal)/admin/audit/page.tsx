@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { PageHeader } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 
 const PAGE = 50;
 
 export default async function AuditPage({ searchParams }: { searchParams: Promise<{ page?: string; entity?: string }> }) {
-  await requireRole("ADMIN");
+  await requirePermission("admin");
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
   const where = sp.entity ? { entity: sp.entity } : {};

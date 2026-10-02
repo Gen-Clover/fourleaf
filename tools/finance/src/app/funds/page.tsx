@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { can, requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { PASS_THROUGH, fundBalances } from "../../lib/treasury";
 import { ymd } from "../../lib/finance";
@@ -11,8 +11,8 @@ import { deleteFundEntry } from "./actions";
 const TYPE_LABEL: Record<string, string> = { ALLOCATION: "Allocation", OPENING: "Opening", TRANSFER: "Transfer", ADJUSTMENT: "Adjustment", EXPENSE: "Expense paid" };
 
 export default async function FundsPage({ searchParams }: { searchParams: Promise<{ fund?: string }> }) {
-  const user = await requireRole("EDITOR");
-  const isAdmin = user.role === "ADMIN";
+  const user = await requirePermission("finance.view");
+  const isAdmin = can(user.role, "finance.edit");
   const sp = await searchParams;
   const funds = await fundBalances();
   const fund = funds.find((f) => f.key === sp.fund) ?? null;

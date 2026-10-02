@@ -6,6 +6,7 @@ import { type GPlace, pageSpeed, placeDetails } from "./google";
 import { cityFromAddress, cleanName, personFromName } from "./names";
 import { type AuditFacts, scoreLead } from "./scoring";
 import { getLfSettings } from "./settings";
+import { changeStage } from "./stages";
 
 export const SYSTEM_USER = "Lead Finder";
 
@@ -147,8 +148,11 @@ export async function autoQualify(leadId: string) {
   else if (s.autoQualifyScore > 0 && lead.bestScore >= s.autoQualifyScore && (lead.phone || lead.intlPhone || lead.email || lead.whatsappNumber) && lead.businessStatus !== "CLOSED_TEMPORARILY")
     [stage, why] = ["QUALIFIED", `score ${lead.bestScore} ≥ ${s.autoQualifyScore} and a way to reach them`];
   if (!stage) return;
-  await prisma.lead.update({ where: { id: leadId }, data: { stage } });
-  await prisma.leadActivity.create({ data: { leadId, type: "STAGE", text: `New → ${stage === "QUALIFIED" ? "Qualified" : "Not a fit"} (automatic: ${why})`, byName: SYSTEM_USER } });
+  await changeStage(leadId, stage, {
+    by: { id: null, name: SYSTEM_USER },
+    reason: `automatic: ${why}`,
+    data: stage === "NOT_A_FIT" ? { notFitReason: "Big chain / franchise" } : {},
+  });
 }
 
 /** Check the lead's website (and optionally its Google speed score), save the audit and contacts, rescore. */

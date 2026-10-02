@@ -7,6 +7,8 @@
 //    is written to the audit log.
 // 4. Counters raised to the highest number already in use, so imported records never collide.
 // 5. Settings: the old project prefix goes; invoices switch to GCI/… if none has been issued yet.
+// 6. People without an ID get one: GCE-0001 (employee) or GCT-0001 (contractor), oldest first.
+// 7. Deal values saved on a lead (the old Deal card) move to a deal (opportunity), the one place values live now.
 import { prisma } from "@genclover/db";
 import {
   CLIENT_NUMBER_RE,
@@ -15,6 +17,8 @@ import {
   clientCounter,
   invoiceCounter,
   nextClientNumber,
+  nextOpportunityCode,
+  nextPersonCode,
   nextProjectCode,
   projectCounter,
   raiseCounter,
@@ -82,7 +86,53 @@ async function main() {
     data: { description: "Invoices are numbered PREFIX/26-27/0001: one consecutive series per financial year (GST). Change it only before a year's first invoice." },
   });
 
-  console.log(`IDs checked: ${clients.length} client(s), ${projects.length} project(s).`);
+  // 6
+  const people = await prisma.person.findMany({ orderBy: { createdAt: "asc" }, select: { id: true, name: true, code: true, type: true } });
+  for (const p of people) {
+    const m = p.code?.match(/^(GCE|GCT)-(\d{4,})$/);
+    if (m) await raiseCounter(prisma, `person:${m[1] === "GCE" ? "EMPLOYEE" : "CONTRACTOR"}`, Number(m[2]));
+  }
+  for (const p of people.filter((p) => !p.code)) {
+    const code = await nextPersonCode(prisma, p.type === "CONTRACTOR" ? "CONTRACTOR" : "EMPLOYEE");
+    await prisma.person.update({ where: { id: p.id }, data: { code }, select: { id: true } });
+    console.log(`Person "${p.name}": ${code}`);
+  }
+
+  // 7. A lead with a value and no deal gets one (stage from the lead's). A lead that has deals keeps them as they are;
+  // its old value is cleared either way, so no number is left that nothing shows.
+  const OPP_STAGE: Record<string, [string, number]> = { REPLIED: ["DISCOVERY", 10], MEETING: ["QUALIFIED", 25], PROPOSAL: ["PROPOSAL", 50], SNOOZED: ["DISCOVERY", 10], WON: ["WON", 100], LOST: ["LOST", 0] };
+  const valued = await prisma.lead.findMany({
+    where: { dealValue: { not: null } },
+    select: { id: true, name: true, stage: true, market: true, dealValue: true, dealCurrency: true, expectedCloseAt: true, wonAt: true, wonPackage: true, wonCarePlan: true, bestService: true, ownerId: true, ownerName: true, _count: { select: { opportunities: true } } },
+  });
+  for (const l of valued) {
+    if (l._count.opportunities === 0 && OPP_STAGE[l.stage]) {
+      const [stage, probability] = OPP_STAGE[l.stage];
+      const code = await nextOpportunityCode(prisma);
+      await prisma.opportunity.create({
+        data: {
+          code,
+          leadId: l.id,
+          title: l.wonPackage ? `${l.wonPackage}${l.wonCarePlan && l.wonCarePlan !== "None" ? ` + ${l.wonCarePlan}` : ""}` : `${l.name}: deal`,
+          model: "FIXED_SCOPE",
+          services: l.bestService ? [l.bestService] : [],
+          stage,
+          probability,
+          value: l.dealValue,
+          currency: l.dealCurrency ?? (l.market === "US" ? "USD" : "INR"),
+          expectedCloseAt: l.expectedCloseAt,
+          wonAt: stage === "WON" ? (l.wonAt ?? new Date()) : null,
+          ownerId: l.ownerId,
+          ownerName: l.ownerName,
+          createdBy: SYSTEM,
+        },
+      });
+      console.log(`Lead "${l.name}": deal value moved to ${code}`);
+    } else console.log(`Lead "${l.name}": old deal value ${l.dealValue} cleared (its deals hold the values)`);
+    await prisma.lead.update({ where: { id: l.id }, data: { dealValue: null, dealCurrency: null }, select: { id: true } });
+  }
+
+  console.log(`IDs checked: ${clients.length} client(s), ${projects.length} project(s), ${people.length} person(s).`);
 }
 
 main()

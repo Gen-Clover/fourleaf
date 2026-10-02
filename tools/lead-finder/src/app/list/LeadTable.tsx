@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { date } from "@genclover/ui/format";
-import { isService, SERVICE } from "../../lib/services";
+import { isService, NOT_FIT_REASONS, SERVICE } from "../../lib/services";
 import { bulkAction } from "../actions";
 import { Score, StageBadge, WebsiteState } from "../bits";
 import { download } from "../ClaudePanel";
 import { claudeBrief, estimateRefresh, refreshMatching } from "../moreActions";
+import { assignOwner } from "../stageActions";
 
 type Row = {
   id: string;
@@ -29,11 +30,30 @@ type Row = {
   claudeFit: string | null;
   googleFetchedAt: string | null;
   market: string;
+  ownerName: string | null;
 };
 
 const money = (usd: number) => (usd <= 0 ? "free (within the monthly allowance)" : `about $${usd.toFixed(2)}`);
 
-export default function LeadTable({ leads, canEdit, showService, hot, warm, query, total }: { leads: Row[]; canEdit: boolean; showService: boolean; hot: number; warm: number; query: string; total: number }) {
+export default function LeadTable({
+  leads,
+  users,
+  canEdit,
+  showService,
+  hot,
+  warm,
+  query,
+  total,
+}: {
+  leads: Row[];
+  users: { id: string; name: string }[];
+  canEdit: boolean;
+  showService: boolean;
+  hot: number;
+  warm: number;
+  query: string;
+  total: number;
+}) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState("");
@@ -46,11 +66,23 @@ export default function LeadTable({ leads, canEdit, showService, hot, warm, quer
       else n.add(id);
       return n;
     });
-  const run = (action: Parameters<typeof bulkAction>[1]) =>
+  const run = (action: Parameters<typeof bulkAction>[1], reason?: string) =>
     start(async () => {
-      const r = await bulkAction([...selected], action);
+      const r = await bulkAction([...selected], action, reason);
       setMsg(r?.message ?? "");
-      if (r?.ok) setSelected(new Set());
+      if (r?.ok) {
+        setSelected(new Set());
+        router.refresh();
+      }
+    });
+  const assign = (userId: string) =>
+    start(async () => {
+      const r = await assignOwner([...selected], userId === "none" ? null : userId);
+      setMsg(r?.message ?? "");
+      if (r?.ok) {
+        setSelected(new Set());
+        router.refresh();
+      }
     });
   /** Refresh Google data for the selection, or for every lead matching the filters; asks first with the cost. */
   const refresh = (scope: "selected" | "matching") =>
@@ -82,7 +114,15 @@ export default function LeadTable({ leads, canEdit, showService, hot, warm, quer
           {selected.size > 0 && (
             <>
               <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run("QUALIFY")}>✓ Qualify</button>
-              <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run("NOT_A_FIT")}>Not a fit</button>
+              <select className="input-sm w-auto" value="" disabled={pending} onChange={(e) => e.target.value && run("NOT_A_FIT", e.target.value)} aria-label="Mark not a fit, with the reason">
+                <option value="">Not a fit…</option>
+                {NOT_FIT_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <select className="input-sm w-auto" value="" disabled={pending} onChange={(e) => e.target.value && assign(e.target.value)} aria-label="Assign an owner">
+                <option value="">Assign to…</option>
+                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                <option value="none">Nobody (unassign)</option>
+              </select>
               <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run("SPEED")}>Speed test</button>
               <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run("RECHECK")}>Re-check websites</button>
               <button className="btn-secondary btn-sm" disabled={pending} onClick={() => refresh("selected")}>Refresh Google data</button>
@@ -138,7 +178,10 @@ export default function LeadTable({ leads, canEdit, showService, hot, warm, quer
                   {l.rating ? <>{l.rating}★ <span className="text-neutral-500">· {l.reviewCount ?? 0}</span></> : "—"}
                   {l.googleFetchedAt && <div className="text-[11px] text-neutral-500">updated {date(l.googleFetchedAt)}</div>}
                 </td>
-                <td>{l.doNotContact ? <span className="badge bg-red-50 text-red-700">Do not contact</span> : <StageBadge stage={l.stage} />}</td>
+                <td>
+                  {l.doNotContact ? <span className="badge bg-red-50 text-red-700">Do not contact</span> : <StageBadge stage={l.stage} />}
+                  {l.ownerName && <div className="mt-0.5 text-[11px] text-neutral-500">{l.ownerName}</div>}
+                </td>
                 <td className={`hidden text-sm whitespace-nowrap lg:table-cell ${due ? "font-medium text-brand-fg" : "text-neutral-600"}`}>{l.nextFollowUpAt ? (due ? `Due ${date(l.nextFollowUpAt)}` : date(l.nextFollowUpAt)) : "—"}</td>
                 <td className="num">
                   <Score score={l.score} hot={hot} warm={warm} />

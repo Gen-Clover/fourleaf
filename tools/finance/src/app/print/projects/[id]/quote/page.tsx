@@ -71,7 +71,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         </tbody>
       </table>
 
-      <div className="mb-6 ml-auto w-96 space-y-1">
+      <div className="mb-6 ml-auto w-full space-y-1 sm:w-96">
         {project.engagementModel === "RETAINER" && (
           <>
             <div className="flex justify-between"><span>Monthly retainer ({project.agreedRetainerHrs} hrs)</span><b>{usd(project.agreedMonthly)}</b></div>

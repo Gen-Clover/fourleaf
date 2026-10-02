@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@genclover/ui";
-import { hasRole, requireUser } from "@genclover/auth";
+import { can, requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { date } from "@genclover/ui/format";
 import { emailConfigured } from "../../lib/email";
@@ -8,8 +8,11 @@ import { messageOptions } from "../../lib/leadMessages";
 import { isMarket, localTime, MARKETS, MARKET_KEYS, marketOf } from "../../lib/markets";
 import { whatsappNumber } from "../../lib/messages";
 import type { Reason } from "../../lib/scoring";
-import { ENGAGED_STAGES } from "../../lib/services";
-import { getLfSettings } from "../../lib/settings";
+import { ENGAGED_STAGES, TASK_TYPES } from "../../lib/services";
+import { NO_DEAL } from "../../lib/dealAccess";
+import { awaitingOurReply } from "../../lib/outreach";
+import { getLfSettings, getLfTexts } from "../../lib/settings";
+import { endOfTodayIst as endOfToday, startOfTodayIst as startOfToday } from "../../lib/time";
 import { Score, StageBadge } from "../bits";
 import MarketToggle from "../MarketToggle";
 import TodayCard from "./TodayCard";
@@ -26,17 +29,17 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const market = isMarket(sp.market) ? sp.market : undefined;
   const s = await getLfSettings();
-  const endOfToday = new Date(Date.now() + 330 * 60_000);
-  endOfToday.setUTCHours(23, 59, 59, 999);
-  const endOfTodayIst = new Date(endOfToday.getTime() - 330 * 60_000);
-  const startOfTodayIst = new Date(endOfTodayIst.getTime() - 86_400_000 + 1);
+  const endOfTodayIst = endOfToday();
+  const startOfTodayIst = startOfToday();
+  const texts = await getLfTexts();
   const scope = { doNotContact: false, branchOfId: null, ...(market ? { market } : {}) };
   // Automatic email follow-ups (Settings) are sent by the worker, so they don't need a person here.
   const autoEmail = s.autoEmailFollowUps > 0 && emailConfigured();
 
-  const [replies, followUps, contactedToday] = await Promise.all([
-    prisma.lead.findMany({ where: { ...scope, stage: { in: ENGAGED_STAGES }, nextFollowUpAt: { not: null, lte: endOfTodayIst } }, orderBy: { nextFollowUpAt: "asc" }, take: 50 }),
+  const [replies, followUps, contactedToday, myTasks] = await Promise.all([
+    prisma.lead.findMany({ where: { ...scope, stage: { in: ENGAGED_STAGES }, nextFollowUpAt: { not: null, lte: endOfTodayIst } }, omit: NO_DEAL, orderBy: { nextFollowUpAt: "asc" }, take: 50 }),
     prisma.lead.findMany({
+      omit: NO_DEAL,
       where: {
         ...scope,
         stage: "CONTACTED",
@@ -48,10 +51,18 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
       take: 100,
     }),
     prisma.lead.count({ where: { firstContactAt: { gte: startOfTodayIst }, ...(market ? { market } : {}) } }),
+    // My calls and meetings today, and any I missed.
+    prisma.leadTask.findMany({
+      where: { status: "OPEN", assigneeId: user.id, dueAt: { lte: endOfTodayIst } },
+      orderBy: { dueAt: "asc" },
+      take: 20,
+      include: { lead: { select: { id: true, name: true, code: true } } },
+    }),
   ]);
   const newQuota = Math.max(0, s.dailyNewContacts - contactedToday);
   const fresh = newQuota
     ? await prisma.lead.findMany({
+        omit: NO_DEAL,
         where: { ...scope, stage: "QUALIFIED", contactCount: 0, OR: [{ nextFollowUpAt: null }, { nextFollowUpAt: { lte: new Date() } }] },
         orderBy: [{ bestScore: "desc" }, { reviewCount: "desc" }],
         take: newQuota,
@@ -63,14 +74,15 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
     ...fresh.map((l) => ({ lead: l, kind: "NEW" as Kind })),
   ];
   const current = queue.find((q) => q.lead.id === sp.id) ?? queue[0];
-  const canEdit = hasRole(user.role, "EDITOR");
+  const canEdit = can(user.role, "leads.edit");
   const link = (id: string) => `/leads/today?${new URLSearchParams({ ...(market ? { market } : {}), id })}`;
 
   let card = null;
   if (current) {
     const l = current.lead;
     const m = marketOf(l.market);
-    const { stepLabel, options } = messageOptions(l, user.name.split(" ")[0]);
+    const { stepLabel, options } = messageOptions(l, user.name.split(" ")[0], { bookingLink: texts.bookingLink });
+    const replyDueAt = current.kind === "REPLY" && awaitingOurReply(l) && l.lastReplyAt ? new Date(l.lastReplyAt.getTime() + 3_600_000).toISOString() : null;
     const lastReply = current.kind === "REPLY" ? await prisma.leadActivity.findFirst({ where: { leadId: l.id, type: "REPLY" }, orderBy: { at: "desc" } }) : null;
     const reasons: Reason[] = l.reasons ? JSON.parse(l.reasons) : [];
     card = (
@@ -101,7 +113,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
             <div className="rounded-lg bg-neutral-50 p-3 text-sm">
               <div className="mb-1 font-medium text-neutral-900">Their reply</div>
               <p className="whitespace-pre-line text-neutral-700">{lastReply?.text ?? "They replied."}</p>
-              <p className="mt-2 text-xs text-neutral-500">Answer them (call or message), then set the stage on the lead page: Call / meeting, Proposal sent, Lost or Not a fit.</p>
+              <p className="mt-2 text-xs text-neutral-500">Sort what they said, then answer with a suggested reply. Calls, meetings, Won and Lost are on the lead page.</p>
             </div>
           ) : (
             <ul className="space-y-0.5 text-sm text-neutral-600">
@@ -112,6 +124,8 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
             <TodayCard
               id={l.id}
               kind={current.kind}
+              replyCategory={l.replyCategory}
+              replyDueAt={replyDueAt}
               options={options}
               whatsapp={whatsappNumber(l.whatsappNumber, l.intlPhone, l.phone, l.market)}
               email={l.emailBounced ? null : l.email}
@@ -135,10 +149,39 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
       />
       <div className="mb-4 flex flex-wrap gap-2 text-sm">
         <span className="badge bg-brand-soft text-brand-fg">{replies.length} replies</span>
+        {myTasks.length > 0 && <span className="badge bg-amber-50 text-amber-800">{myTasks.length} calls / meetings</span>}
         <span className="badge bg-violet-50 text-violet-700">{followUps.length} follow-ups</span>
         <span className="badge bg-blue-50 text-blue-700">{fresh.length} first messages ({contactedToday} of {s.dailyNewContacts} sent today)</span>
         {autoEmail && <span className="badge bg-neutral-100 text-neutral-600">Email follow-ups are sent automatically</span>}
       </div>
+      {myTasks.length > 0 && (
+        <section className="card mb-6 min-w-0">
+          <div className="card-h">
+            <div className="card-t">My calls & meetings today</div>
+            <Link href="/leads/tasks" className="text-xs text-brand-fg underline">All tasks →</Link>
+          </div>
+          <ul className="divide-y divide-neutral-100">
+            {myTasks.map((t) => {
+              const late = t.dueAt.getTime() < Date.now();
+              return (
+                <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+                  <span className="min-w-0">
+                    <span className={`font-medium ${late ? "text-red-700" : "text-neutral-900"}`}>
+                      {t.dueAt.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}
+                      {t.dueAt < startOfTodayIst && ` · ${date(t.dueAt)}`}
+                    </span>
+                    {" · "}
+                    {TASK_TYPES[t.type] ?? t.type} with{" "}
+                    <Link className="text-brand-fg underline" href={`/leads/${t.lead.id}`}>{t.lead.name}</Link>
+                    {t.agenda && <span className="text-neutral-500"> · {t.agenda}</span>}
+                  </span>
+                  {late && <span className="badge bg-red-50 text-red-700">{t.dueAt < startOfTodayIst ? "missed" : "now / late"}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       {!current ? (
         <div className="card p-10 text-center text-sm text-neutral-500">
           All done for today. <Link className="text-brand-fg underline" href="/leads/list?stage=NEW">Qualify more leads</Link> or{" "}

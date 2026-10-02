@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader, Stat } from "@genclover/ui";
-import { hasRole, requireUser } from "@genclover/auth";
+import { can, requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { date } from "@genclover/ui/format";
 import { isService, SERVICE } from "../../../lib/services";
@@ -30,7 +30,7 @@ export default async function SearchDetail({ params }: { params: Promise<{ id: s
   const score = (l: (typeof hits)[number]["lead"]) => (service ? l[service.field] : l.bestScore);
   const top = hits.map((h) => h.lead).sort((a, b) => score(b) - score(a)).slice(0, 25);
   const running = ["QUEUED", "RUNNING"].includes(search.status);
-  const canEdit = hasRole(user.role, "EDITOR");
+  const canEdit = can(user.role, "leads.edit");
   const deeperCells = search.saturated.reduce((n, x) => n + grid(JSON.parse(x).rect, settings.cellKm).length, 0);
 
   return (

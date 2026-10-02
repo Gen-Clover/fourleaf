@@ -5,35 +5,20 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@genclover/db";
 import * as ids from "@genclover/ids";
-import { assertRole } from "@genclover/auth";
+import { assertPermission } from "@genclover/auth";
 import { audit } from "@genclover/db/audit";
 import { getBuckets, getParams } from "../../lib/settings";
-import { effectiveRate, floorRate, monthlyRevenue, premiumRates } from "../../lib/calc";
-import { monthRange } from "../../lib/finance";
-import { PROJECT_KINDS, PROJECT_STATUSES, TIERS } from "@genclover/ui/format";
+import { isApproved, requestApproval } from "../../lib/approvals";
+import { effectiveRate, floorRate, monthlyRevenue, premiumRates, quoteSummary } from "../../lib/calc";
+import { addDays, monthRange, weekStart, ymd } from "../../lib/finance";
+import { TIERS } from "@genclover/ui/format";
 
 export type Result = { ok: boolean; message: string } | undefined;
 
 const errMsg = (e: unknown) => (e instanceof z.ZodError ? e.issues[0].message : e instanceof Error ? e.message : String(e));
 const optStr = z.string().trim().transform((s) => (s === "" ? null : s)).nullable().optional();
 const optDate = z.string().trim().transform((s) => (s === "" ? null : new Date(s))).nullable().optional();
-const MODEL = z.enum(["TM", "RETAINER", "BLENDED", "FIXED"]);
-
-const ProjectInfo = z.object({
-  name: z.string().trim().min(1, "Project name is required"),
-  clientId: z.string().min(1, "Select a client"),
-  engagementModel: MODEL,
-  status: z.enum(PROJECT_STATUSES as [string, ...string[]]).optional(),
-  startDate: optDate,
-  endDate: optDate,
-  description: optStr,
-  probability: z.string().trim().transform((s) => (s === "" ? null : Math.round(Number(s)))).pipe(z.number().min(0).max(100, "Probability is 0–100%").nullable()).optional(),
-  expectedCloseDate: optDate,
-  kind: z.enum(PROJECT_KINDS).default("PROJECT"),
-});
-
-/** The client is fixed once the project exists: its ID (ABR-P01) belongs to that client. */
-const ProjectUpdate = ProjectInfo.omit({ clientId: true });
+const MODEL = z.enum(["TM", "RETAINER", "BLENDED", "FIXED", "FIXED_PRICE"]);
 
 /** Next ID for a project of this client: ABR-P01, ABR-P02 … */
 async function nextCode(clientId: string) {
@@ -41,41 +26,10 @@ async function nextCode(clientId: string) {
   return ids.nextProjectCode(prisma, client);
 }
 
-export async function createProject(_: Result, fd: FormData): Promise<Result> {
-  let id = "";
-  try {
-    const user = await assertRole("EDITOR");
-    const d = ProjectInfo.parse(Object.fromEntries(fd));
-    const buckets = await getBuckets();
-    const p = await getParams();
-    const code = await nextCode(d.clientId);
-    const project = await prisma.project.create({
-      data: {
-        ...d,
-        code,
-        status: "DRAFT",
-        allocationSnapshot: JSON.stringify(buckets),
-        createdById: user.id,
-        // sensible agreement defaults from packages
-        agreedBlendedRate: d.engagementModel === "BLENDED" ? p.blendedRate : null,
-        agreedMonthly: d.engagementModel === "RETAINER" ? p.retainerAmount : null,
-        agreedRetainerHrs: d.engagementModel === "RETAINER" ? p.retainerHours : null,
-        agreedExtraRate: d.engagementModel === "RETAINER" ? p.additionalHourRate : null,
-      },
-    });
-    id = project.id;
-    await audit(user, "CREATE", "Project", id, `Created ${code} — ${d.name}`);
-  } catch (e) {
-    return { ok: false, message: errMsg(e) };
-  }
-  revalidatePath("/projects");
-  redirect(`/projects/${id}?tab=pricing`);
-}
-
 /** Quick Calculator → project: creates the project and its resource lines in one go. */
 export async function createProjectFromCalculator(input: unknown): Promise<Result & { id?: string }> {
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("finance.edit");
     const d = z
       .object({
         name: z.string().trim().min(1, "Project name is required"),
@@ -117,21 +71,6 @@ export async function createProjectFromCalculator(input: unknown): Promise<Resul
   }
 }
 
-export async function updateProject(id: string, _: Result, fd: FormData): Promise<Result> {
-  try {
-    const user = await assertRole("EDITOR");
-    const d = ProjectUpdate.parse(Object.fromEntries(fd));
-    const prev = await prisma.project.findUniqueOrThrow({ where: { id } });
-    await prisma.project.update({ where: { id }, data: d });
-    const changes = [prev.status !== d.status && `status ${prev.status} → ${d.status}`, prev.engagementModel !== d.engagementModel && `model ${prev.engagementModel} → ${d.engagementModel}`].filter(Boolean);
-    await audit(user, "UPDATE", "Project", id, `${prev.code}: details updated${changes.length ? ` (${changes.join(", ")})` : ""}`);
-    revalidatePath(`/projects/${id}`);
-    return { ok: true, message: "Project saved." };
-  } catch (e) {
-    return { ok: false, message: errMsg(e) };
-  }
-}
-
 const ResourceRow = z.object({
   id: z.string().optional(),
   roleId: z.string().nullable(),
@@ -145,7 +84,7 @@ const ResourceRow = z.object({
 
 export async function saveResources(projectId: string, rows: unknown): Promise<Result> {
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("finance.edit");
     const data = z.array(ResourceRow).parse(rows);
     const [p, roles, existing, project] = await Promise.all([
       getParams(),
@@ -178,7 +117,7 @@ export async function saveResources(projectId: string, rows: unknown): Promise<R
       }
     });
     await audit(user, "UPDATE", "Project", projectId, `${project.code}: resources/quote saved (${data.length} lines)`);
-    revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/finance/projects/${projectId}`);
     return { ok: true, message: "Resources & quote saved." };
   } catch (e) {
     return { ok: false, message: errMsg(e) };
@@ -200,13 +139,20 @@ const AgreementSchema = z.object({
 
 export async function saveAgreement(id: string, _: Result, fd: FormData): Promise<Result> {
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("finance.edit");
     const { markAgreed, ...d } = AgreementSchema.parse(Object.fromEntries(fd));
     if (d.engagementModel === "RETAINER" && (d.agreedMonthly == null || d.agreedRetainerHrs == null)) throw new Error("Retainer needs a monthly amount and included hours");
     if (d.engagementModel === "BLENDED" && d.agreedBlendedRate == null) throw new Error("Blended model needs a blended rate");
     if (d.engagementModel === "FIXED" && d.agreedMonthly == null) throw new Error("Fixed model needs a monthly fee");
-    const prev = await prisma.project.findUniqueOrThrow({ where: { id } });
+    const prev = await prisma.project.findUniqueOrThrow({ where: { id }, include: { resources: true } });
     const agreeNow = markAgreed === "on";
+    // Rates below the rate-card floor need a price exception, approved by a second person.
+    const below = quoteSummary(prev.resources).belowFloor;
+    if (agreeNow && below.length && !(await isApproved("PRICE_EXCEPTION", id))) {
+      await requestApproval("PRICE_EXCEPTION", id, { summary: `${prev.code}: ${below.join(", ")} below the floor`, link: `/finance/projects/${id}?tab=pricing`, by: user });
+      revalidatePath("/approvals");
+      throw new Error(`Priced below the floor (${below.join(", ")}): sent to Approvals. Mark it agreed once the price exception is approved.`);
+    }
     await prisma.project.update({
       where: { id },
       data: {
@@ -216,7 +162,7 @@ export async function saveAgreement(id: string, _: Result, fd: FormData): Promis
       },
     });
     await audit(user, "UPDATE", "Agreement", id, `${prev.code}: agreement saved (${d.engagementModel}${agreeNow ? ", marked agreed" : ""})`);
-    revalidatePath(`/projects/${id}`);
+    revalidatePath(`/finance/projects/${id}`);
     return { ok: true, message: agreeNow ? "Agreement saved and project marked as agreed/active." : "Agreement saved." };
   } catch (e) {
     return { ok: false, message: errMsg(e) };
@@ -224,15 +170,15 @@ export async function saveAgreement(id: string, _: Result, fd: FormData): Promis
 }
 
 export async function refreshSnapshot(id: string) {
-  const user = await assertRole("ADMIN");
+  const user = await assertPermission("finance.settings");
   const buckets = await getBuckets();
   const p = await prisma.project.update({ where: { id }, data: { allocationSnapshot: JSON.stringify(buckets) } });
   await audit(user, "UPDATE", "Project", id, `${p.code}: allocation snapshot refreshed to current model`);
-  revalidatePath(`/projects/${id}`);
+  revalidatePath(`/finance/projects/${id}`);
 }
 
 export async function deleteProject(id: string) {
-  const user = await assertRole("ADMIN");
+  const user = await assertPermission("admin");
   const issued = await prisma.invoice.count({ where: { projectId: id, status: { not: "DRAFT" } } });
   if (issued) throw new Error("Project has issued invoices — set it to Cancelled or Completed instead of deleting");
   const p = await prisma.project.delete({ where: { id } });
@@ -252,7 +198,7 @@ const MonthSchema = z.object({
 
 export async function saveMonth(projectId: string, input: unknown, originalMonth?: string): Promise<Result> {
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("finance.edit");
     const d = MonthSchema.parse(input);
     const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
     const calc = monthlyRevenue(project, d.lines, d.adjustment);
@@ -272,7 +218,7 @@ export async function saveMonth(projectId: string, input: unknown, originalMonth
       await tx.monthlyLine.createMany({ data: d.lines.map((l) => ({ ...l, recordId: rec.id })) });
     });
     await audit(user, existing ? "UPDATE" : "CREATE", "Billing", projectId, `${project.code} ${d.month}: ${calc.hours} hrs, $${calc.revenue.toFixed(2)}`);
-    revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/finance/projects/${projectId}`);
     revalidatePath("/billing");
     return { ok: true, message: `${d.month} saved — revenue $${calc.revenue.toFixed(2)}.` };
   } catch (e) {
@@ -281,37 +227,45 @@ export async function saveMonth(projectId: string, input: unknown, originalMonth
 }
 
 export async function deleteMonth(projectId: string, month: string) {
-  const user = await assertRole("EDITOR");
+  const user = await assertPermission("finance.edit");
   const rec = await prisma.monthlyRecord.findUniqueOrThrow({ where: { projectId_month: { projectId, month } }, include: { project: true } });
   if (rec.invoiceId) throw new Error("Month is on an invoice — delete or void the invoice first");
   await prisma.monthlyRecord.delete({ where: { id: rec.id } });
   await audit(user, "DELETE", "Billing", projectId, `${rec.project.code} ${month} deleted`);
-  revalidatePath(`/projects/${projectId}`);
-  redirect(`/projects/${projectId}?tab=monthly`);
+  revalidatePath(`/finance/projects/${projectId}`);
+  redirect(`/finance/projects/${projectId}?tab=monthly`);
 }
 
 /**
- * Actual billable hours for a month from timesheets, one line per resource of the quote.
- * People are mapped to a resource line through their project assignment; unmapped time gets its own line.
+ * Billed hours for a month from approved timesheets, one line per resource of the quote. Billed hours already
+ * carry each person's billing basis (hours worked, fixed hours per day, or a multiplier). People are mapped to a
+ * resource line through their assignment; unmapped time gets its own line. Unapproved weeks are left out.
  */
 export async function timesheetMonthLines(projectId: string, month: string) {
-  await assertRole("EDITOR");
+  await assertPermission("finance.edit");
   const { from, to } = monthRange(month);
   const [resources, assignments, entries] = await Promise.all([
     prisma.projectResource.findMany({ where: { projectId }, orderBy: { sortOrder: "asc" } }),
     prisma.assignment.findMany({ where: { projectId } }),
     prisma.timeEntry.findMany({ where: { projectId, billable: true, date: { gte: from, lt: to } }, include: { person: { select: { name: true } } } }),
   ]);
+  const approved = new Set(
+    (await prisma.timesheetWeek.findMany({ where: { status: "APPROVED", weekStart: { gte: addDays(from, -6), lt: to } }, select: { personId: true, weekStart: true } })).map((w) => `${w.personId}:${ymd(w.weekStart)}`),
+  );
+  const counted = entries.filter((e) => approved.has(`${e.personId}:${ymd(weekStart(e.date))}`));
+  const pending = entries.length - counted.length;
   const lineOf = new Map(assignments.map((a) => [a.personId, a.resourceId]));
   const hoursByResource = new Map<string, number>();
   const unmapped = new Map<string, number>();
-  for (const e of entries) {
+  for (const e of counted) {
+    const h = e.billedHours ?? e.hours;
     const rid = lineOf.get(e.personId);
-    if (rid) hoursByResource.set(rid, (hoursByResource.get(rid) ?? 0) + e.hours);
-    else unmapped.set(e.person.name, (unmapped.get(e.person.name) ?? 0) + e.hours);
+    if (rid) hoursByResource.set(rid, (hoursByResource.get(rid) ?? 0) + h);
+    else unmapped.set(e.person.name, (unmapped.get(e.person.name) ?? 0) + h);
   }
   return {
-    total: entries.reduce((s, e) => s + e.hours, 0),
+    total: counted.reduce((s, e) => s + (e.billedHours ?? e.hours), 0),
+    pendingEntries: pending,
     lines: [
       ...resources.map((r) => ({ resourceId: r.id as string | null, label: r.headcount > 1 ? `${r.label} ×${r.headcount}` : r.label, hours: hoursByResource.get(r.id) ?? 0, rate: effectiveRate(r) })),
       ...[...unmapped.entries()].map(([name, hours]) => ({ resourceId: null, label: `${name} (not mapped to a quote line)`, hours, rate: 0 })),

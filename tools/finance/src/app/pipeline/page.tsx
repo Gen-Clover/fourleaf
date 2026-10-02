@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader, Stat, StatusBadge } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { getParams } from "../../lib/settings";
 import { payrollPlan } from "../../lib/treasury";
@@ -14,7 +14,7 @@ const contractMonths = (start: Date | null, end: Date | null) =>
   start && end ? Math.max(1, (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth() + 1) : 12;
 
 export default async function PipelinePage() {
-  await requireRole("EDITOR");
+  await requirePermission("finance.view");
   const [projects, p, payroll] = await Promise.all([
     prisma.project.findMany({ where: { status: { in: [...PIPELINE, "ACTIVE"] } }, include: { client: { select: { name: true } }, resources: true }, orderBy: [{ expectedCloseDate: "asc" }, { code: "desc" }] }),
     getParams(),
@@ -49,13 +49,13 @@ export default async function PipelinePage() {
           <tbody>
             {rows.map((r) => (
               <tr key={r.pr.id}>
-                <td><Link href={`/projects/${r.pr.id}`} className="text-brand-fg hover:underline"><span className="font-mono text-xs">{r.pr.code}</span> {r.pr.name}</Link></td>
+                <td><Link href={`/finance/projects/${r.pr.id}`} className="text-brand-fg hover:underline"><span className="font-mono text-xs">{r.pr.code}</span> {r.pr.name}</Link></td>
                 <td>{r.pr.client.name}</td>
                 <td><StatusBadge status={r.pr.status} /></td>
                 <td className={`whitespace-nowrap ${r.pr.expectedCloseDate && r.pr.expectedCloseDate < new Date() && r.pr.status !== "ACTIVE" ? "text-red-600" : ""}`}>{r.pr.status === "ACTIVE" ? "Won" : date(r.pr.expectedCloseDate)}</td>
                 <td className="num">{usd0(r.monthly)}</td>
                 <td className="num">{usd0(r.contract)} <span className="text-xs text-neutral-500">/ {r.months} mo</span></td>
-                <td className="num">{r.pr.status !== "ACTIVE" && r.pr.probability == null ? <Link href={`/projects/${r.pr.id}`} className="text-xs text-amber-700 underline">set</Link> : pct(r.prob / 100)}</td>
+                <td className="num">{r.pr.status !== "ACTIVE" && r.pr.probability == null ? <Link href={`/finance/projects/${r.pr.id}`} className="text-xs text-amber-700 underline">set</Link> : pct(r.prob / 100)}</td>
                 <td className="num font-semibold">{usd0(r.weightedMonthly)}</td>
               </tr>
             ))}

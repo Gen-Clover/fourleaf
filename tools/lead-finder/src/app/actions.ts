@@ -7,7 +7,7 @@ import { prisma } from "@genclover/db";
 import { audit } from "@genclover/db/audit";
 import { enqueue } from "@genclover/db/jobs";
 import * as ids from "@genclover/ids";
-import { assertRole } from "@genclover/auth";
+import { assertPermission } from "@genclover/auth";
 import { errMsg, type Result } from "@genclover/ui/result";
 import { type Area, expand, grid, isRect } from "../lib/geo";
 import { costOf, findArea, monthUsage } from "../lib/google";
@@ -17,7 +17,8 @@ import { isMarket } from "../lib/markets";
 import { OUTREACH_TYPES, recordOutreach } from "../lib/outreach";
 import { queueRefresh } from "../lib/refresh";
 import { type CellPayload, MAX_CELL_QUERIES, createSearch, nextWeekly, planCells } from "../lib/searchPlan";
-import { CLOSED_STAGES, isService, SOURCES, STAGES, STAGE_LABEL } from "../lib/services";
+import { isService, NOT_FIT_REASONS, SOURCES, STAGE_LABEL } from "../lib/services";
+import { changeStage } from "../lib/stages";
 import { getLfSettings, googleKeyConfigured } from "../lib/settings";
 
 // ---------- Searches ----------
@@ -48,7 +49,7 @@ export type Estimate = {
 /** Look up each place's boundary and estimate requests and cost before anything runs. */
 export async function estimateSearch(input: SearchInputT): Promise<Estimate> {
   try {
-    await assertRole("EDITOR");
+    await assertPermission("leads.edit");
     if (!googleKeyConfigured()) return { ok: false, message: "Add GOOGLE_MAPS_API_KEY to .env to search Google Maps." };
     const d = SearchInput.parse(input);
     const niche = await prisma.leadNiche.findUniqueOrThrow({ where: { key: d.nicheKey } });
@@ -77,7 +78,7 @@ export async function estimateSearch(input: SearchInputT): Promise<Estimate> {
 export async function startSearch(input: SearchInputT & { resolved: Area[]; repeat?: { dayOfWeek: number; hour: number } | null }): Promise<Result> {
   let id = "";
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("leads.edit");
     const d = SearchInput.parse(input);
     const areas = z.array(z.object({ name: z.string() }).passthrough()).parse(input.resolved) as Area[];
     if (!areas.length || !areas.every(isRect)) throw new Error("Estimate the search first");
@@ -111,7 +112,7 @@ export async function startSearch(input: SearchInputT & { resolved: Area[]; repe
 
 /** A quick search hit Google's 60 limit in some places: search just those places thoroughly (grid + splitting). */
 export async function deepenSearch(id: string) {
-  const user = await assertRole("EDITOR");
+  const user = await assertPermission("leads.edit");
   const search = await prisma.leadSearch.findUniqueOrThrow({ where: { id } });
   const s = await getLfSettings();
   const items = search.saturated.map((x) => JSON.parse(x) as { phrase: string; rect: CellPayload["rect"]; area: string });
@@ -130,7 +131,7 @@ export async function deepenSearch(id: string) {
 }
 
 export async function setScheduleActive(id: string, active: boolean) {
-  const user = await assertRole("EDITOR");
+  const user = await assertPermission("leads.edit");
   const cur = await prisma.leadSchedule.findUniqueOrThrow({ where: { id } });
   const sch = await prisma.leadSchedule.update({ where: { id }, data: { active, ...(active ? { nextRunAt: nextWeekly(cur.dayOfWeek, cur.hour) } : {}) } });
   await audit(user, "UPDATE", "LeadSchedule", id, `${active ? "Resumed" : "Paused"} weekly search ${sch.name}`);
@@ -138,20 +139,20 @@ export async function setScheduleActive(id: string, active: boolean) {
 }
 
 export async function deleteSchedule(id: string) {
-  const user = await assertRole("EDITOR");
+  const user = await assertPermission("leads.edit");
   const sch = await prisma.leadSchedule.delete({ where: { id } });
   await audit(user, "DELETE", "LeadSchedule", id, `Deleted weekly search ${sch.name}`);
   revalidatePath("/leads/searches");
 }
 
 export async function runScheduleNow(id: string) {
-  await assertRole("EDITOR");
+  await assertPermission("leads.edit");
   await prisma.leadSchedule.update({ where: { id }, data: { nextRunAt: new Date() } });
   revalidatePath("/leads/searches");
 }
 
 export async function stopSearch(id: string) {
-  const user = await assertRole("EDITOR");
+  const user = await assertPermission("leads.edit");
   await prisma.job.updateMany({ where: { group: id, status: { in: ["QUEUED", "PAUSED"] } }, data: { status: "CANCELLED" } });
   await prisma.leadSearch.update({ where: { id }, data: { status: "STOPPED", finishedAt: new Date() } });
   await audit(user, "UPDATE", "LeadSearch", id, "Stopped lead search");
@@ -159,7 +160,7 @@ export async function stopSearch(id: string) {
 }
 
 export async function resumeSearch(id: string) {
-  const user = await assertRole("EDITOR");
+  const user = await assertPermission("leads.edit");
   const { count } = await prisma.job.updateMany({ where: { group: id, status: "PAUSED" }, data: { status: "QUEUED", runAfter: new Date() } });
   await prisma.leadSearch.update({ where: { id }, data: { status: count ? "RUNNING" : "DONE", error: null, finishedAt: count ? null : new Date() } });
   await audit(user, "UPDATE", "LeadSearch", id, `Resumed lead search (${count} cells)`);
@@ -186,7 +187,7 @@ const NewLead = z.object({
 export async function addLead(_: Result, fd: FormData): Promise<Result> {
   let id = "";
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("leads.edit");
     const d = NewLead.parse(Object.fromEntries(fd));
     const code = await ids.nextLeadId(prisma);
     const website = d.website ? normalizeUrl(d.website) : null;
@@ -228,7 +229,7 @@ const LeadDetails = z.object({
 
 export async function saveLeadDetails(id: string, _: Result, fd: FormData): Promise<Result> {
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("leads.edit");
     const d = LeadDetails.parse(Object.fromEntries(fd));
     const prev = await prisma.lead.findUniqueOrThrow({ where: { id } });
     const website = d.website ? normalizeUrl(d.website) : null;
@@ -254,42 +255,13 @@ export async function saveLeadDetails(id: string, _: Result, fd: FormData): Prom
   }
 }
 
-const StageInput = z.object({
-  stage: z.enum(STAGES),
-  lostReason: opt,
-  nextFollowUpAt: z.string().trim().transform((s) => (s === "" ? null : new Date(s))).nullable().optional(),
-});
-
-export async function saveStage(id: string, _: Result, fd: FormData): Promise<Result> {
-  try {
-    const user = await assertRole("EDITOR");
-    const d = StageInput.parse(Object.fromEntries(fd));
-    if (d.stage === "LOST" && !d.lostReason) throw new Error("Pick why it was lost");
-    if (d.stage === "WON") throw new Error('Use "Convert to client" to mark a lead as won');
-    const prev = await prisma.lead.findUniqueOrThrow({ where: { id } });
-    const closed = CLOSED_STAGES.includes(d.stage);
-    await prisma.lead.update({
-      where: { id },
-      data: { stage: d.stage, lostReason: d.stage === "LOST" ? d.lostReason : null, nextFollowUpAt: closed ? null : d.nextFollowUpAt ?? null },
-    });
-    if (prev.stage !== d.stage) {
-      const text = `${STAGE_LABEL[prev.stage]} → ${STAGE_LABEL[d.stage]}${d.stage === "LOST" ? ` (${d.lostReason})` : ""}`;
-      await prisma.leadActivity.create({ data: { leadId: id, type: "STAGE", text, byId: user.id, byName: user.name } });
-    }
-    revalidatePath(`/leads/${id}`);
-    return { ok: true, message: "Saved." };
-  } catch (e) {
-    return { ok: false, message: errMsg(e) };
-  }
-}
-
 /** A note, or a message/call/visit (which moves the lead on and schedules the next follow-up). */
 export async function logActivity(id: string, input: { type: string; text: string; service?: string | null }): Promise<Result> {
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("leads.edit");
     const type = z.enum(["NOTE", ...OUTREACH_TYPES] as [string, ...string[]]).parse(input.type);
     const text = z.string().trim().min(1, "Write something").max(4000).parse(input.text);
-    const service = isService(input.service) ? input.service : null;
+    const service = input.service && /^[A-Z_]{2,30}$/.test(input.service) ? input.service : null;
     if (OUTREACH_TYPES.includes(type)) await recordOutreach(id, { channel: type, text, service, by: { id: user.id, name: user.name } });
     else await prisma.leadActivity.create({ data: { leadId: id, type, text, byId: user.id, byName: user.name } });
     revalidatePath(`/leads/${id}`);
@@ -300,7 +272,7 @@ export async function logActivity(id: string, input: { type: string; text: strin
 }
 
 export async function setDoNotContact(id: string, value: boolean) {
-  const user = await assertRole("EDITOR");
+  const user = await assertPermission("leads.edit");
   const lead = await prisma.lead.update({ where: { id }, data: { doNotContact: value, ...(value ? { nextFollowUpAt: null } : {}) } });
   await prisma.leadActivity.create({ data: { leadId: id, type: "SYSTEM", text: value ? "Marked do not contact" : "Removed from do not contact", byId: user.id, byName: user.name } });
   await audit(user, "UPDATE", "Lead", id, `${lead.code}: ${value ? "do not contact" : "contact allowed again"}`);
@@ -308,15 +280,15 @@ export async function setDoNotContact(id: string, value: boolean) {
 }
 
 export async function recheckWebsite(id: string, speedTest = false) {
-  await assertRole("EDITOR");
+  await assertPermission("leads.edit");
   await prisma.lead.update({ where: { id }, data: { auditStatus: "PENDING" } });
   await enqueue(prisma, { type: speedTest ? "LF_SPEED" : "LF_AUDIT", payload: { leadId: id }, group: "audit:manual" });
   revalidatePath(`/leads/${id}`);
 }
 
-export async function bulkAction(idsIn: string[], action: "QUALIFY" | "NOT_A_FIT" | "SPEED" | "RECHECK" | "REFRESH"): Promise<Result> {
+export async function bulkAction(idsIn: string[], action: "QUALIFY" | "NOT_A_FIT" | "SPEED" | "RECHECK" | "REFRESH", reason?: string): Promise<Result> {
   try {
-    const user = await assertRole("EDITOR");
+    const user = await assertPermission("leads.edit");
     const leadIds = z.array(z.string()).min(1, "Select some leads").max(500).parse(idsIn);
     if (action === "REFRESH") {
       const n = await queueRefresh(leadIds);
@@ -326,12 +298,11 @@ export async function bulkAction(idsIn: string[], action: "QUALIFY" | "NOT_A_FIT
     }
     if (action === "QUALIFY" || action === "NOT_A_FIT") {
       const stage = action === "QUALIFY" ? "QUALIFIED" : "NOT_A_FIT";
+      const why = action === "NOT_A_FIT" ? z.enum(NOT_FIT_REASONS as [string, ...string[]], { error: "Pick why they're not a fit" }).parse(reason) : null;
       const from = action === "QUALIFY" ? ["NEW"] : ["NEW", "QUALIFIED"];
-      const targets = await prisma.lead.findMany({ where: { id: { in: leadIds }, stage: { in: from } }, select: { id: true, stage: true } });
-      await prisma.lead.updateMany({ where: { id: { in: targets.map((t) => t.id) } }, data: { stage, ...(stage === "NOT_A_FIT" ? { nextFollowUpAt: null } : {}) } });
-      await prisma.leadActivity.createMany({
-        data: targets.map((t) => ({ leadId: t.id, type: "STAGE", text: `${STAGE_LABEL[t.stage]} → ${STAGE_LABEL[stage]}`, byId: user.id, byName: user.name, service: null })),
-      });
+      const targets = await prisma.lead.findMany({ where: { id: { in: leadIds }, stage: { in: from } }, select: { id: true } });
+      for (const t of targets)
+        await changeStage(t.id, stage, { by: { id: user.id, name: user.name }, reason: why, data: why ? { notFitReason: why, nextFollowUpAt: null } : {} });
       revalidatePath("/leads/list");
       return { ok: true, message: `${targets.length} lead(s) marked ${STAGE_LABEL[stage].toLowerCase()}.` };
     }
@@ -342,42 +313,6 @@ export async function bulkAction(idsIn: string[], action: "QUALIFY" | "NOT_A_FIT
   } catch (e) {
     return { ok: false, message: errMsg(e) };
   }
-}
-
-// ---------- Convert to client ----------
-
-const Convert = z.object({
-  name: z.string().trim().min(1, "Client name is required"),
-  code: z.string().transform(ids.normalizeClientCode).pipe(z.string().regex(ids.CLIENT_CODE_RE, `Client code: ${ids.CLIENT_CODE_HINT}`)),
-  contactName: opt,
-  email: z.string().trim().transform((s) => (s === "" ? null : s)).pipe(z.email("Invalid email").nullable()).optional(),
-  phone: opt,
-  country: opt,
-  city: opt,
-});
-
-/** Won: create the client (Client ID + code) and link the lead, then start a project in the Financial System. */
-export async function convertToClient(id: string, _: Result, fd: FormData): Promise<Result> {
-  let clientId = "";
-  try {
-    const user = await assertRole("EDITOR");
-    const d = Convert.parse(Object.fromEntries(fd));
-    const lead = await prisma.lead.findUniqueOrThrow({ where: { id } });
-    if (lead.clientId) throw new Error("This lead is already a client");
-    const taken = await prisma.client.findUnique({ where: { code: d.code }, select: { name: true } });
-    if (taken) throw new Error(`Client code ${d.code} is already used by ${taken.name}`);
-    const number = await ids.nextClientNumber(prisma);
-    const client = await prisma.client.create({
-      data: { ...d, number, website: lead.website, notes: `From lead ${lead.code}` },
-    });
-    clientId = client.id;
-    await prisma.lead.update({ where: { id }, data: { clientId, stage: "WON", nextFollowUpAt: null } });
-    await prisma.leadActivity.create({ data: { leadId: id, type: "STAGE", text: `Won: client ${number} (${d.code})`, byId: user.id, byName: user.name } });
-    await audit(user, "CREATE", "Client", clientId, `Created client ${number} (${d.code}) ${d.name} from lead ${lead.code}`);
-  } catch (e) {
-    return { ok: false, message: errMsg(e) };
-  }
-  redirect(`/projects/new?client=${clientId}`);
 }
 
 // ---------- Settings (admin) ----------
@@ -394,7 +329,7 @@ const NicheRow = z.object({
 
 export async function saveNiches(rows: unknown): Promise<Result> {
   try {
-    const user = await assertRole("ADMIN");
+    const user = await assertPermission("leads.settings");
     const data = z.array(NicheRow).parse(rows);
     if (new Set(data.map((r) => r.key)).size !== data.length) throw new Error("Two niches have the same key");
     for (const [i, r] of data.entries()) await prisma.leadNiche.upsert({ where: { key: r.key }, create: { ...r, sortOrder: i }, update: { ...r, sortOrder: i } });
@@ -408,13 +343,14 @@ export async function saveNiches(rows: unknown): Promise<Result> {
 
 export async function saveLfSettings(values: Record<string, string>): Promise<Result> {
   try {
-    const user = await assertRole("ADMIN");
+    const user = await assertPermission("leads.settings");
     const rows = await prisma.setting.findMany({ where: { group: "Lead Finder" } });
     const changes: string[] = [];
     for (const row of rows) {
       if (!(row.key in values)) continue;
       const v = String(values[row.key]).trim();
-      if (v === "" || Number.isNaN(Number(v)) || Number(v) < 0) throw new Error(`${row.label} must be a number, 0 or more`);
+      if (row.type !== "text" && (v === "" || Number.isNaN(Number(v)) || Number(v) < 0)) throw new Error(`${row.label} must be a number, 0 or more`);
+      if (row.type === "text" && v && !/^https?:\/\/\S+$/.test(v)) throw new Error(`${row.label} must be a web address (https://…)`);
       if (v !== row.value) {
         await prisma.setting.update({ where: { key: row.key }, data: { value: v } });
         changes.push(`${row.label}: ${row.value} → ${v}`);

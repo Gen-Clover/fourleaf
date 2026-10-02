@@ -48,15 +48,16 @@ One policy is live at a time. An admin can switch it in one click.
 
 | Policy | Delivery | Talent | Ops | Tech | Sales | Working cap. | Survival | Ventures | BD | Profit |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **Rate Card v2** *(live today)* | 65 | 10 | 8 | 4 | 4 | 4 | 0 | 0 | 0 | 5 |
+| **Final allocation (Oct 2026)** *(live)* | 40 | 7 | 7 | 4 | 5 | 9 | 5 | 3 | 5 | 15 |
+| Rate Card v2 | 65 | 10 | 8 | 4 | 4 | 4 | 0 | 0 | 0 | 5 |
 | Base allocation | 55 | 5 | 7 | 3 | 4 | 4 | 10 | 4 | 2 | 6 |
 | Startup *(proposal)* | 56 | 4 | 7 | 3 | 6 | 4 | 12 | 1 | 2 | 5 |
 | Growth *(proposal)* | 56 | 8 | 6 | 3 | 6 | 4 | 8 | 2 | 3 | 4 |
 | Mature *(proposal)* | 52 | 5 | 6 | 3 | 4 | 4 | 8 | 7 | 2 | 9 |
 
-- Rate Card v2 stays live because the 2026 rates are priced on 65% delivery. Moving to a 55% delivery policy lowers every role's cost-coverage check, so review the rates when you switch.
+- The final allocation (October 2026) is live. Its purpose, subcategories (what each bucket is spent on), exclusions and examples are on **Settings & formula → Where the money goes**. The 2026 rates were priced on 65% delivery: at 40% the rate card's cost-coverage check shows 6 roles under cost and 10 tight, so review the rates.
 - Startup, Growth and Mature are starting proposals following the research's direction (startup = survival and sales, growth = talent and sales, mature = profit and ventures). Review them before use.
-- A policy change affects **future** receipts and new projects only. History is never rewritten.
+- A policy change affects **future** receipts and new projects. **Apply to existing projects and receipts** (Financial Policies) brings existing project snapshots and past receipts' fund split onto the live policy; fund transfers and spends are not touched.
 
 ## 4. How money flows through the system
 

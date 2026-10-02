@@ -1,0 +1,51 @@
+// People tool: documents for employees and contractors, and contractor work orders (assignment to a project
+// under their master contractor agreement). Pay amounts are cost data: owners, CFO and HR only.
+
+/// type: OFFER_LETTER | EMPLOYMENT_AGREEMENT | MCA | RATE_SCHEDULE | NDA | IP_ASSIGNMENT | ID_PROOF | TAX_FORM | OTHER
+/// status: DRAFT | SENT | SIGNED | EXPIRED
+model PersonDocument {
+  id          String    @id @default(cuid()) @map("_id")
+  personId    String
+  person      Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  type        String
+  title       String
+  status      String    @default("DRAFT")
+  documentUrl String?
+  signedAt    DateTime?
+  expiresAt   DateTime?
+  notes       String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([personId])
+}
+
+/// Contractor on a project: GCT-0001-W01. payTreatment: HOURLY (paid for approved hours) | INCLUDED (covered by
+/// their monthly retainer or salary) | FIXED_FEE (fixedFeeInr for the whole work order).
+/// status: DRAFT | ISSUED | ACTIVE | CLOSED
+model WorkOrder {
+  id                    String    @id @default(cuid()) @map("_id")
+  code                  String    @unique
+  personId              String
+  person                Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  projectId             String
+  project               Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role                  String?
+  expectedHoursPerMonth Float     @default(0)
+  startDate             DateTime?
+  endDate               DateTime?
+  payTreatment          String    @default("HOURLY")
+  fixedFeeInr           Float?
+  feePaidInr            Float     @default(0) // FIXED_FEE: paid so far through pay runs
+  status                String    @default("DRAFT")
+  documentUrl           String?
+  reportingTo           String?
+  notes                 String?
+  createdBy             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([personId])
+  @@index([projectId])
+}

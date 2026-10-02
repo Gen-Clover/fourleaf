@@ -23,6 +23,8 @@ import type { Reason } from "./lib/scoring";
 import { type CellPayload, type SearchConfig, createSearch, nextNight, nextWeekly } from "./lib/searchPlan";
 import { CLOSED_STAGES, isService, SERVICE, type ServiceKey } from "./lib/services";
 import { getLfSettings } from "./lib/settings";
+import { changeStage, retryLost, wakeSnoozed } from "./lib/stages";
+import { sendDueReminders } from "./lib/tasks";
 
 export type JobResult = void | "PAUSED";
 export type JobHandler = (payload: Record<string, unknown>, job: { id: string; group: string | null }) => Promise<JobResult>;
@@ -179,16 +181,23 @@ export async function leadFinderMaintenance() {
       select: { id: true },
     });
     for (const l of silent) {
-      await prisma.lead.update({ where: { id: l.id }, data: { stage: "LOST", lostReason: "No reply", nextFollowUpAt: null } });
-      await prisma.leadActivity.create({ data: { leadId: l.id, type: "STAGE", text: `Contacted → Lost (automatic: no reply ${s.noReplyDays} days after the last follow-up)`, byName: SYSTEM_USER } });
+      await changeStage(l.id, "LOST", {
+        by: { id: null, name: SYSTEM_USER },
+        reason: `automatic: no reply ${s.noReplyDays} days after the last follow-up`,
+        data: { lostReason: "No reply", nextFollowUpAt: null },
+      });
     }
     closed = silent.length;
   }
   return { cleared: cleared.count, refreshQueued: toRefresh.length, closedNoReply: closed };
 }
 
-/** Every minute: start weekly searches that are due, and make sure tonight's speed tests are queued. */
+/**
+ * Every minute: start weekly searches that are due, wake snoozed leads whose date has come, bring back lost
+ * leads on their "try again" date, send meeting reminders, and make sure tonight's speed tests are queued.
+ */
 export async function leadFinderScheduler() {
+  const [woken, retried, reminders] = [await wakeSnoozed(), await retryLost(), await sendDueReminders()];
   const due = await prisma.leadSchedule.findMany({ where: { active: true, nextRunAt: { lte: new Date() } } });
   for (const sch of due) {
     // Move the schedule on first, so a failing search can't start again every minute.
@@ -198,7 +207,7 @@ export async function leadFinderScheduler() {
   }
   const nightly = await prisma.job.count({ where: { type: "LF_NIGHTLY", status: { in: ["QUEUED", "RUNNING"] } } });
   if (!nightly) await enqueue(prisma, { type: "LF_NIGHTLY", payload: {}, runAfter: nextNight() });
-  return { schedulesStarted: due.length };
+  return { schedulesStarted: due.length, snoozedWoken: woken, lostRetried: retried, remindersSent: reminders };
 }
 
 /** Every 10 minutes: read replies, unsubscribes and bounces from the sending mailbox. */

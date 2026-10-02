@@ -17,6 +17,8 @@ const PARTIAL_UNIQUE = [
   { collection: "InvoiceLine", field: "expenseId", name: "InvoiceLine_expenseId_billed_once" },
   // One lead per Google place; leads added by hand have no place ID.
   { collection: "Lead", field: "placeId", name: "Lead_placeId_once" },
+  // GCE-0001 / GCT-0001, handed out by packages/ids (people added before IDs get one in its backfill).
+  { collection: "Person", field: "code", name: "Person_code_once" },
 ];
 
 async function main() {
@@ -42,6 +44,18 @@ async function main() {
   }
   console.log(`Optional fields backfilled with null: ${filled} document update(s)`);
 
+  // 2b. Pay model for people added before it existed (must run before the defaults below, which would
+  //     otherwise make everyone SALARY): hourly rate → HOURLY; monthly contractor → RETAINER; else SALARY.
+  const payModels = (await prisma.$runCommandRaw({
+    update: "Person",
+    updates: [
+      { q: { payModel: { $exists: false }, costBasis: "HOURLY" }, u: { $set: { payModel: "HOURLY" } }, multi: true },
+      { q: { payModel: { $exists: false }, type: "CONTRACTOR" }, u: { $set: { payModel: "RETAINER" } }, multi: true },
+      { q: { payModel: { $exists: false } }, u: { $set: { payModel: "SALARY" } }, multi: true },
+    ],
+  })) as { nModified?: number };
+  console.log(`People pay model set: ${payModels.nModified ?? 0}`);
+
   // 3. Defaults. Prisma fills a missing field's default when reading, but a filter such as
   //    `{ contactCount: 0 }` can't match a document that lacks the field. Write plain defaults
   //    (numbers, booleans, strings, empty lists) into documents created before the field existed.
@@ -61,6 +75,25 @@ async function main() {
     defaulted += res.nModified ?? 0;
   }
   console.log(`Fields backfilled with their defaults: ${defaulted} document update(s)`);
+
+  // 4. Stage dates for leads created before stages were timed: the last message (or last update) is the
+  //    best guess for when the lead reached its stage, and for when a won lead was won.
+  const guess = { $ifNull: ["$lastContactAt", { $ifNull: ["$updatedAt", "$createdAt"] }] };
+  const staged = (await prisma.$runCommandRaw({
+    update: "Lead",
+    updates: [
+      { q: { stageChangedAt: null }, u: [{ $set: { stageChangedAt: guess } }], multi: true },
+      { q: { stage: "WON", wonAt: null }, u: [{ $set: { wonAt: "$stageChangedAt" } }], multi: true },
+    ],
+  } as unknown as Prisma.InputJsonObject)) as { nModified?: number };
+  console.log(`Lead stage dates backfilled: ${staged.nModified ?? 0} document update(s)`);
+
+  // 5. Roles. Accounts from before the named roles (packages/auth/src/access.ts): ADMIN became Owner,
+  //    EDITOR Sales and VIEWER Team member. Review them on Users & Roles afterwards.
+  const renamed = await Promise.all(
+    Object.entries({ ADMIN: "OWNER", EDITOR: "SALES", VIEWER: "TEAM" }).map(([from, to]) => prisma.user.updateMany({ where: { role: from }, data: { role: to } })),
+  );
+  console.log(`User roles renamed: ${renamed.reduce((n, r) => n + r.count, 0)}`);
 }
 
 main()

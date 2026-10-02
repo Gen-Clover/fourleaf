@@ -1,0 +1,123 @@
+// Governance & Compliance tool: the compliance calendar, issues and escalations, the decision register, and
+// approvals (maker-checker) used by every tool.
+
+/// category: MCA | GST | TDS | INCOME_TAX | PAYROLL | CONTRACT | INSURANCE | BOARD | OTHER
+/// frequency: MONTHLY | QUARTERLY | HALF_YEARLY | YEARLY | ONE_OFF
+model ComplianceItem {
+  id           String             @id @default(cuid()) @map("_id")
+  name         String
+  category     String
+  authority    String? // GST portal, MCA, Income Tax, EPFO…
+  frequency    String             @default("MONTHLY")
+  dueDate      DateTime // the next due date
+  ownerId      String?
+  ownerName    String?
+  professional String? // CA / CS / lawyer responsible
+  remindDays   Int                @default(7)
+  remindedAt   DateTime?
+  active       Boolean            @default(true)
+  notes        String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  filings      ComplianceFiling[]
+
+  @@index([dueDate])
+}
+
+/// One completed occurrence of a compliance item, with the evidence.
+model ComplianceFiling {
+  id          String         @id @default(cuid()) @map("_id")
+  itemId      String
+  item        ComplianceItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  period      String // e.g. 2026-09, Q2 FY26-27, FY 2025-26
+  dueDate     DateTime
+  filedAt     DateTime
+  filedBy     String
+  reference   String? // acknowledgement / challan number
+  evidenceUrl String?
+  notes       String?
+  createdAt   DateTime       @default(now())
+
+  @@index([itemId])
+}
+
+/// ISS-2026-0001. category: RESOURCE | SCOPE_CLIENT | TECHNICAL | FINANCIAL | PEOPLE | OTHER
+/// level 1 operational · 2 functional · 3 CEO · 4 board / adviser. status: OPEN | IN_REVIEW | ESCALATED | DECIDED | CLOSED
+model Issue {
+  id          String      @id @default(cuid()) @map("_id")
+  code        String      @unique
+  title       String
+  category    String
+  priority    String      @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  level       Int         @default(1)
+  status      String      @default("OPEN")
+  projectId   String?
+  project     Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  clientId    String?
+  description String?
+  impact      String? // people affected, delivery and money impact
+  options     String? // options considered
+  ownerId     String?
+  ownerName   String?
+  dueDate     DateTime?
+  decision    String?
+  decidedBy   String?
+  decidedAt   DateTime?
+  lessons     String?
+  raisedBy    String
+  closedAt    DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  notes       IssueNote[]
+
+  @@index([status])
+  @@index([projectId])
+}
+
+model IssueNote {
+  id      String   @id @default(cuid()) @map("_id")
+  issueId String
+  issue   Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  text    String
+  byName  String
+  at      DateTime @default(now())
+
+  @@index([issueId])
+}
+
+/// DEC-2026-001. type: BOARD | CEO | MANAGEMENT
+model Decision {
+  id        String   @id @default(cuid()) @map("_id")
+  code      String   @unique
+  title     String
+  type      String   @default("MANAGEMENT")
+  date      DateTime
+  decision  String
+  decidedBy String
+  reference String? // resolution number, minutes link
+  issueId   String?
+  createdBy String
+  createdAt DateTime @default(now())
+}
+
+/// Maker-checker: something waiting for a second person. type: PAY_RUN | EXPENSE | PRICE_EXCEPTION.
+/// status: PENDING | APPROVED | REJECTED. The person who asked cannot approve (owners may, with a note).
+model Approval {
+  id              String    @id @default(cuid()) @map("_id")
+  type            String
+  entityId        String
+  summary         String
+  amountInr       Float?
+  link            String?
+  status          String    @default("PENDING")
+  requestedById   String?
+  requestedByName String
+  decidedById     String?
+  decidedByName   String?
+  decidedAt       DateTime?
+  note            String?
+  createdAt       DateTime  @default(now())
+
+  @@index([status, type])
+  @@index([entityId])
+}

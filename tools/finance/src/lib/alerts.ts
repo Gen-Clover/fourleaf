@@ -51,6 +51,7 @@ export async function computeAlerts(snap: Awaited<ReturnType<typeof cfoSnapshot>
   if (negMonth) a.push({ level: "critical", title: "Cash forecast goes negative", detail: `Projected ${L(negMonth.closing)} at the end of ${monthLabel(negMonth.month)}.`, href: "/cfo" });
 
   for (const f of snap.funds) {
+    if (f.key === "gst") continue; // clearing: paid to the government from the GST return
     if (f.key === "passthrough") {
       if (f.balance < -0.5) a.push({ level: "attention", title: "Pass-through costs awaiting reimbursement", detail: `${L(-f.balance)} paid for clients, not yet recovered on paid invoices.`, href: "/expenses" });
       continue;
@@ -90,8 +91,8 @@ export async function computeAlerts(snap: Awaited<ReturnType<typeof cfoSnapshot>
 
   // ---- Projects ----
   for (const x of fyLedger.projects) {
-    if (x.revenueInr > 0 && x.deliveryRatio != null && x.deliveryRatio > x.deliveryPct / 100) a.push({ level: "warning", title: `${x.code}: people cost over delivery budget`, detail: `${Math.round(x.deliveryRatio * 100)}% of revenue vs ${x.deliveryPct}% delivery share.`, href: `/projects/${x.id}?tab=team` });
-    else if (x.revenueInr > 0 && x.marginPct != null && x.marginPct < 0.2) a.push({ level: "attention", title: `${x.code}: project margin low`, detail: `${Math.round(x.marginPct * 100)}% margin this FY.`, href: `/projects/${x.id}?tab=team` });
+    if (x.revenueInr > 0 && x.deliveryRatio != null && x.deliveryRatio > x.deliveryPct / 100) a.push({ level: "warning", title: `${x.code}: people cost over delivery budget`, detail: `${Math.round(x.deliveryRatio * 100)}% of revenue vs ${x.deliveryPct}% delivery share.`, href: `/finance/projects/${x.id}?tab=profit` });
+    else if (x.revenueInr > 0 && x.marginPct != null && x.marginPct < 0.2) a.push({ level: "attention", title: `${x.code}: project margin low`, detail: `${Math.round(x.marginPct * 100)}% margin this FY.`, href: `/finance/projects/${x.id}?tab=profit` });
   }
   const profit = fyLedger.variance.find((v) => v.isProfit);
   if (profit && fyLedger.totals.revenueInr > 0 && profit.actual >= profit.budget) a.push({ level: "healthy", title: "Profit target exceeded", detail: `${L(profit.actual)} net profit vs ${L(profit.budget)} plan this FY.` });

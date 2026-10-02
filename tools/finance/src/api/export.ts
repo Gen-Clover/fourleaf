@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentUser, hasRole } from "@genclover/auth";
+import { can, getCurrentUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { ledger } from "../lib/ledger";
 import { fyMonths, fyShort, fyStartYear, monthRange, paidUsd, paymentFx, toCsv } from "../lib/finance";
@@ -7,7 +7,7 @@ import { fyMonths, fyShort, fyStartYear, monthRange, paidUsd, paymentFx, toCsv }
 // CSV exports for accounting / GST filings, one Indian financial year at a time.
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
-  if (!user || !hasRole(user.role, "EDITOR")) return new NextResponse("Forbidden", { status: 403 });
+  if (!user || !can(user.role, "finance.view")) return new NextResponse("Forbidden", { status: 403 });
   const kind = req.nextUrl.searchParams.get("kind") ?? "";
   const fy = Number(req.nextUrl.searchParams.get("fy")) || fyStartYear(new Date());
   const months = fyMonths(fy);
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     }
     case "timesheets": {
       const rows = await prisma.timeEntry.findMany({ where: { date: inFy }, orderBy: [{ date: "asc" }], include: { person: true, project: true } });
-      const withCost = user.role === "ADMIN";
+      const withCost = can(user.role, "cost.view");
       csv = toCsv(
         ["Date", "Person", "Project", "Hours", "Billable", ...(withCost ? ["Cost rate INR/hr", "Cost INR"] : [])],
         rows.map((t) => [t.date, t.person.name, t.project.code, t.hours, t.billable ? "Y" : "N", ...(withCost ? [t.costRateInr.toFixed(2), (t.hours * t.costRateInr).toFixed(2)] : [])]),

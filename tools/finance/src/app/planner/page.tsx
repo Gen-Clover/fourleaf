@@ -1,12 +1,12 @@
 import { PageHeader } from "@genclover/ui";
-import { requireRole } from "@genclover/auth";
+import { requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { getBuckets, getParams } from "../../lib/settings";
 import { activePolicyName, cfoSnapshot } from "../../lib/treasury";
 import HirePlanner from "./HirePlanner";
 
 export default async function PlannerPage() {
-  await requireRole("EDITOR");
+  await requirePermission("finance.view");
   const [roles, buckets, p, snap, policy] = await Promise.all([
     prisma.roleRate.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" }, select: { id: true, name: true, standardRate: true, ctcMinL: true, ctcMaxL: true } }),
     getBuckets(),
