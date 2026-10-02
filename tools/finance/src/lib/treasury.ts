@@ -7,6 +7,8 @@ import { addDays, allocateCash, monthRange, monthlyCostInr, monthlyEquivalent, o
 export const PASS_THROUGH = "passthrough";
 /** GST collected on invoices: owed to the government, so it's kept apart from the operating funds. */
 export const GST_FUND = "gst";
+/** Sales incentives held from receipts until they are paid in a pay run (packages/incentives). */
+export const INCENTIVE_FUND = "incentive";
 
 /** Treasury settings with defaults. */
 export async function getTreasurySettings() {
@@ -28,16 +30,21 @@ export async function activePolicyName() {
 
 /**
  * Allocation engine: split one receipt into funds. The client pass-through share of the invoice goes to the
- * pass-through clearing fund (it pays back costs already incurred); the rest follows the active policy.
+ * pass-through clearing fund (it pays back costs already incurred), GST to the GST fund, a sales incentive earned
+ * on this receipt to the incentive fund (incentiveInr); the rest follows the active policy. Receipts with no
+ * incentive split exactly as before.
  */
-export async function allocationFor(paymentInr: number, invoice: { total: number; taxAmount?: number; lines: { kind: string; amount: number }[] }) {
+export async function allocationFor(paymentInr: number, invoice: { total: number; taxAmount?: number; lines: { kind: string; amount: number }[] }, incentiveInr = 0) {
   const [buckets, policy] = await Promise.all([getBuckets(), activePolicyName()]);
   const pt = invoice.lines.filter((l) => l.kind === "PASS_THROUGH").reduce((s, l) => s + l.amount, 0);
   const ptShare = invoice.total > 0 ? Math.round((paymentInr * pt) / invoice.total) : 0;
   const gstShare = invoice.total > 0 && invoice.taxAmount ? Math.round((paymentInr * invoice.taxAmount) / invoice.total) : 0;
-  const lines = allocateCash(paymentInr - ptShare - gstShare, buckets);
+  const rest = paymentInr - ptShare - gstShare;
+  const held = Math.max(0, Math.min(Math.round(incentiveInr * 100) / 100, rest));
+  const lines = allocateCash(rest - held, buckets);
   if (ptShare) lines.push({ key: PASS_THROUGH, amount: ptShare });
   if (gstShare) lines.push({ key: GST_FUND, amount: gstShare });
+  if (held) lines.push({ key: INCENTIVE_FUND, amount: held });
   return { lines, policy };
 }
 
@@ -97,6 +104,7 @@ export async function fundBalances() {
     ...buckets.map((b) => ({ key: b.key, name: b.name, percent: b.percent, isProfit: b.isProfit })),
     { key: PASS_THROUGH, name: "Client pass-through (clearing)", percent: 0, isProfit: false },
     { key: GST_FUND, name: "GST collected (payable)", percent: 0, isProfit: false },
+    { key: INCENTIVE_FUND, name: "Sales incentives (held until paid)", percent: 0, isProfit: false },
   ];
   const known = new Set(funds.map((f) => f.key));
   const row = () => ({ allocated: 0, other: 0, spent: 0 });

@@ -5,9 +5,12 @@ import { MARKETS, MARKET_KEYS } from "../../lib/markets";
 import { SERVICES } from "../../lib/services";
 import { googleKeyConfigured } from "../../lib/settings";
 import NewSearchForm from "./NewSearchForm";
+import GenerateGate from "../../lib/GenerateGate";
+import { canGenerateLeads } from "../../lib/scope";
 
 export default async function NewSearchPage() {
-  await requirePermission("leads.edit");
+  const user = await requirePermission("leads.edit");
+  if (!(await canGenerateLeads(user))) return <GenerateGate title="New search" />;
   const niches = await prisma.leadNiche.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" }, select: { key: true, label: true, phrases: true, market: true } });
   return (
     <>

@@ -1,0 +1,129 @@
+// Sales incentives (packages/incentives): 10% of the first service a new client buys, 8% to the seller and 2% to
+// their manager, earned only as the client's money is received. Lead Finder records the deal at Won, onboarding
+// confirms it, Finance accrues it on each receipt, pay runs pay it. Every change is logged for the owner.
+
+/// One salesperson's set-up: their manager, whether they earn incentives, and their People record (pay runs).
+model SalesMember {
+  id               String   @id @default(cuid()) @map("_id")
+  userId           String   @unique
+  userName         String
+  managerUserId    String?
+  managerName      String?
+  onIncentive      Boolean  @default(true)
+  // Lead permissions the owner grants per person (lib/distribution.ts in the Lead Finder)
+  canGenerateLeads Boolean  @default(false) // Google searches and imports; hand out the pool by rotation
+  canReassignTeam  Boolean  @default(false) // move leads between people in their own team (never won leads)
+  personId         String? // People record the incentive is paid to in pay runs
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+/// The incentive tied to one won deal: INC-2026-0001.
+/// status: DRAFT (recorded at Won) | PENDING_APPROVAL (onboarding proposed) | APPROVED | NOT_ELIGIBLE | CANCELLED.
+/// services = JSON [{ key, label, kind: ONE_TIME | MONTHLY, value }]: what was sold, at the negotiated price.
+/// The qualifying service is the highest-value one unless someone picks another (autoSelected = false).
+/// baseAmount = its value, excluding GST and pass-through costs (the first month's fee for monthly services).
+model SalesIncentive {
+  id               String            @id @default(cuid()) @map("_id")
+  code             String            @unique
+  status           String            @default("DRAFT")
+  opportunityId    String?
+  leadId           String?
+  clientId         String?
+  projectId        String? // when set, only this project's invoices count
+  // Who earns: taken from the lead's owner at Won. Sellers can't change it; owners can, with a reason.
+  sellerUserId     String?
+  sellerName       String?
+  managerUserId    String?
+  managerName      String?
+  sellerRatePct    Float             @default(8)
+  managerRatePct   Float             @default(2)
+  leadSource       String?
+  // Snapshot at Won, for the owner's change report
+  wonAt            DateTime?
+  wonSummary       String?
+  wonValue         Float?
+  wonCurrency      String?
+  leadOwnerAtWonId String?
+  leadOwnerAtWon   String?
+  // What it's on
+  services         String            @default("[]")
+  qualifyingKey    String?
+  qualifyingLabel  String?
+  qualifyingKind   String?
+  autoSelected     Boolean           @default(true)
+  baseAmount       Float?
+  currency         String            @default("INR")
+  // New-client check (no paid invoice ever, no matching business)
+  newClient        Boolean?
+  duplicateNote    String?
+  // Decisions
+  proposedEligible Boolean?
+  proposedById     String?
+  proposedByName   String?
+  proposedAt       DateTime?
+  decidedById      String?
+  decidedByName    String?
+  decidedAt        DateTime?
+  decisionNote     String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  entries          IncentiveEntry[]
+  changes          IncentiveChange[]
+
+  @@index([status])
+  @@index([sellerUserId])
+  @@index([managerUserId])
+  @@index([clientId])
+  @@index([opportunityId])
+}
+
+/// Money, one line per person per receipt. type: ACCRUAL (earned on a receipt) | REVERSAL (receipt removed,
+/// deal cancelled) | ADJUSTMENT (owner correction). It's in the cash-out bucket from availableOn (receipt date +
+/// hold days) and is paid in the next pay run; paidOn set = paid, and it leaves the person's wallet.
+model IncentiveEntry {
+  id            String         @id @default(cuid()) @map("_id")
+  incentiveId   String
+  incentive     SalesIncentive @relation(fields: [incentiveId], references: [id], onDelete: Cascade)
+  userId        String
+  userName      String
+  role          String // SELLER | MANAGER
+  type          String         @default("ACCRUAL")
+  paymentId     String?
+  invoiceNumber String?
+  basisAmount   Float          @default(0) // revenue counted, in the incentive's currency (seller lines only; 0 on manager lines)
+  basisInr      Float          @default(0)
+  ratePct       Float          @default(0)
+  amountInr     Float
+  date          DateTime
+  availableOn   DateTime
+  payRunId      String?
+  paidOn        DateTime?
+  note          String?
+  createdBy     String?
+  createdAt     DateTime       @default(now())
+
+  @@index([incentiveId])
+  @@index([userId])
+  @@index([paymentId])
+  @@index([payRunId])
+}
+
+/// What changed, when, by whom and at which step. stage: WON | ONBOARDING | APPROVAL | OWNER | FINANCE | SYSTEM.
+model IncentiveChange {
+  id          String         @id @default(cuid()) @map("_id")
+  incentiveId String
+  incentive   SalesIncentive @relation(fields: [incentiveId], references: [id], onDelete: Cascade)
+  at          DateTime       @default(now())
+  stage       String
+  byId        String?
+  byName      String
+  field       String
+  fromValue   String?
+  toValue     String?
+  reason      String?
+
+  @@index([incentiveId])
+  @@index([at])
+}

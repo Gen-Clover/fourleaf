@@ -11,6 +11,7 @@ import { whatsappNumber } from "../../lib/messages";
 import type { Reason } from "../../lib/scoring";
 import { OPEN_OPP_STAGES, OPP_STAGES } from "../../lib/b2b";
 import { canSeeDeal, NO_DEAL, visibleDealValues } from "../../lib/dealAccess";
+import { canSeeLead, leadScope, moveTargets } from "../../lib/scope";
 import { awaitingOurReply } from "../../lib/outreach";
 import { SERVICES, SOURCES, STAGE_LABEL } from "../../lib/services";
 import { getLfSettings, getLfTexts } from "../../lib/settings";
@@ -51,16 +52,18 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
       opportunities: { orderBy: { createdAt: "desc" }, omit: { value: true } },
     },
   });
-  if (!lead) notFound();
+  // Sellers open only their own leads, managers their team's, owners all (lib/scope.ts).
+  if (!lead || !(await canSeeLead(user, lead))) notFound();
   const dealValues = await visibleDealValues(user, lead.opportunities.map((o) => o.id));
   const b2b = lead.kind === "B2B";
   const primaryContact = lead.contacts.find((c) => c.isPrimary) ?? lead.contacts[0];
-  const [settings, niches, texts, users, branches] = await Promise.all([
+  const [settings, niches, texts, users, branches, targets] = await Promise.all([
     getLfSettings(),
     prisma.leadNiche.findMany({ orderBy: { sortOrder: "asc" }, select: { key: true, label: true, market: true } }),
     getLfTexts(),
     prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    lead.brandKey ? prisma.lead.findMany({ where: { brandKey: lead.brandKey, id: { not: lead.id } }, select: { id: true, name: true, area: true, reviewCount: true, branchOfId: true } }) : [],
+    lead.brandKey ? prisma.lead.findMany({ where: { AND: [await leadScope(user), { brandKey: lead.brandKey, id: { not: lead.id } }] }, select: { id: true, name: true, area: true, reviewCount: true, branchOfId: true } }) : [],
+    moveTargets(user),
   ]);
   const canEdit = can(user.role, "leads.edit");
   const niche = niches.find((n) => n.key === lead.nicheKey);
@@ -313,7 +316,8 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             nextFollowUpAt={lead.nextFollowUpAt?.toISOString() ?? null}
             doNotContact={lead.doNotContact}
             ownerId={lead.ownerId}
-            users={users}
+            ownerName={lead.ownerName}
+            users={targets}
             canEdit={canEdit}
             // Winning marks the open deal won; with none, the Won form records one (and its value, if allowed).
             openDeal={openDeal ? `${openDeal.code} · ${openDeal.title}` : null}

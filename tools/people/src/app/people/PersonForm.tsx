@@ -80,11 +80,11 @@ export default function PersonForm({ initial, roles, showPay, canPay, readOnly }
           <label className="block md:col-span-2">
             <span className="label">Pay model</span>
             <select className="input" value={f.payModel} onChange={set("payModel")} disabled={readOnly || !canPay}>
-              {Object.entries(PAY_MODELS).filter(([k]) => (f.type === "EMPLOYEE" ? k === "SALARY" || k === "HOURLY" : k !== "SALARY")).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              {Object.entries(PAY_MODELS).filter(([k]) => (f.type === "EMPLOYEE" ? k === "SALARY" || k === "HOURLY" || k === "COMMISSION" : k !== "SALARY")).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
             <span className="mt-1 block text-xs text-neutral-500">{pm?.hint}</span>
           </label>
-          {f.payModel !== "FIXED_FEE" && input("costInr", pm?.costLabel ?? "Amount ₹", "number", { min: 0, disabled: readOnly || !canPay })}
+          {f.payModel !== "FIXED_FEE" && f.payModel !== "COMMISSION" && input("costInr", pm?.costLabel ?? "Amount ₹", "number", { min: 0, disabled: readOnly || !canPay })}
           {input("nextReviewDate", "Next pay review", "date", { disabled: readOnly || !canPay })}
           {f.type === "CONTRACTOR" && (
             <>

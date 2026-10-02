@@ -27,7 +27,8 @@ export function NewUserForm({ roles }: { roles: R[] }) {
   );
 }
 
-export function UsersTable({ users, meId, roles }: { users: U[]; meId: string; roles: R[] }) {
+/** isOwner: only an owner may give or take the Owner role, or change an owner's account (Admins manage everyone else). */
+export function UsersTable({ users, meId, roles, isOwner }: { users: U[]; meId: string; roles: R[]; isOwner: boolean }) {
   const [msg, setMsg] = useState<{ ok: boolean; message: string } | null>(null);
   const [pending, start] = useTransition();
   const run = (fn: () => Promise<{ ok: boolean; message: string }>) => start(async () => setMsg(await fn()));
@@ -45,8 +46,8 @@ export function UsersTable({ users, meId, roles }: { users: U[]; meId: string; r
               <td className="font-medium">{u.name}{u.id === meId && <span className="ml-1 text-xs text-neutral-400">(you)</span>}</td>
               <td>{u.email}</td>
               <td>
-                <select className="input-sm" value={u.role} disabled={pending} title={roles.find((r) => r.key === u.role)?.description} onChange={(e) => run(() => updateUser(u.id, { role: e.target.value }))}>
-                  {roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                <select className="input-sm" value={u.role} disabled={pending || (!isOwner && u.role === "OWNER")} title={roles.find((r) => r.key === u.role)?.description} onChange={(e) => run(() => updateUser(u.id, { role: e.target.value }))}>
+                  {roles.filter((r) => isOwner || r.key !== "OWNER" || u.role === "OWNER").map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
                 </select>
               </td>
               <td><StatusBadgeClient label={u.active ? "Active" : "Disabled"} tone={u.active ? "green" : "red"} /></td>

@@ -12,6 +12,7 @@
     "@genclover/auth": "*",
     "@genclover/db": "*",
     "@genclover/ids": "*",
+    "@genclover/incentives": "*",
     "@genclover/ui": "*",
     "zod": "^4.6.5"
   },

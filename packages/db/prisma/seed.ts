@@ -177,6 +177,15 @@ async function main() {
   for (const [i, [name, bucketKey]] of categories.entries()) {
     await prisma.expenseCategory.upsert({ where: { name }, update: {}, create: { name, bucketKey, sortOrder: i } });
   }
+  // Sales incentives are paid from their own fund (held from each receipt), not from an allocation bucket.
+  await prisma.expenseCategory.upsert({ where: { name: "Sales incentives" }, update: {}, create: { name: "Sales incentives", bucketKey: "incentive", sortOrder: 90 } });
+  for (const [key, value, label, unit, description] of [
+    ["incentiveSellerPct", "8", "Seller's incentive", "%", "Of the qualifying service (first service of a new client), excluding GST"],
+    ["incentiveManagerPct", "2", "Manager's incentive", "%", "Of their team's qualifying services"],
+    ["incentiveHoldDays", "30", "Hold before payout", "days", "After the client's payment, before the incentive moves to the next pay run"],
+  ]) {
+    await prisma.setting.upsert({ where: { key }, update: {}, create: { key, value, label, unit, description, group: "Sales incentives" } });
+  }
 
   for (const [i, n] of niches.entries()) {
     await prisma.leadNiche.upsert({ where: { key: n.key }, update: {}, create: { market: "IN", bookingRelevant: false, ...n, sortOrder: i } });
@@ -209,7 +218,9 @@ async function main() {
 
   // One test account per role, for trying out what each role sees. Never in production.
   const roleUsers: [string, string, string, string][] = [
+    ["ADMIN", "Test Admin", "admin-role@genclover.local", "AdminRole@Gc2026"],
     ["CFO", "Test CFO", "cfo@genclover.local", "Cfo@Gc2026"],
+    ["SALES_MANAGER", "Test Sales Manager", "salesmanager@genclover.local", "SalesMgr@Gc2026"],
     ["SALES", "Test Sales", "sales@genclover.local", "Sales@Gc2026"],
     ["ONBOARDING", "Test Onboarding", "onboarding@genclover.local", "Onboard@Gc2026"],
     ["DELIVERY", "Test Delivery Manager", "delivery@genclover.local", "Delivery@Gc2026"],
@@ -224,6 +235,25 @@ async function main() {
     // The team member logs hours as this People record (matched by email). No salary, so it adds no cost.
     if (!(await prisma.person.findFirst({ where: { email: "team@genclover.local" } }))) {
       await prisma.person.create({ data: { name: "Test Team Member", email: "team@genclover.local", title: "Developer", costInr: 0, notes: "Test account for the Team member role. Safe to delete." } });
+    }
+    // The test seller reports to the test sales manager; both on incentives only, with People records for pay runs.
+    const [seller, manager] = await Promise.all([prisma.user.findUnique({ where: { email: "sales@genclover.local" } }), prisma.user.findUnique({ where: { email: "salesmanager@genclover.local" } })]);
+    for (const u of [manager, seller]) {
+      if (!u || (await prisma.salesMember.findUnique({ where: { userId: u.id } }))) continue;
+      const person =
+        (await prisma.person.findFirst({ where: { email: u.email } })) ??
+        (await prisma.person.create({ data: { name: u.name, email: u.email, title: u.id === manager?.id ? "Sales manager" : "Sales", department: "Sales", payModel: "COMMISSION", costInr: 0, notes: "Test account for incentives. Safe to delete." } }));
+      await prisma.salesMember.create({
+        data: {
+          userId: u.id,
+          userName: u.name,
+          personId: person.id,
+          onIncentive: true,
+          // The test manager may run searches and hand out the pool, but not move leads (the owner allows that).
+          ...(u.id === manager?.id ? { canGenerateLeads: true } : {}),
+          ...(u.id === seller?.id && manager ? { managerUserId: manager.id, managerName: manager.name } : {}),
+        },
+      });
     }
   }
 

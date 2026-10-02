@@ -156,6 +156,13 @@ model Lead {
   firstService     String? // service the first message was about (reports)
   ownerId          String?
   ownerName        String?
+  // Ownership (lib/distribution.ts). assignedVia: SELF (added it) | ROTATION | MANUAL (owner picked) | TEAM (manager
+  // moved it) | EXPIRY (rotated after no activity) | WON_FIX (owner corrected a won lead). No owner = the pool.
+  assignedAt       DateTime?
+  assignedVia      String?
+  createdById      String? // who added it by hand (null = found by a search or imported)
+  createdByName    String?
+  rotationWarnedAt DateTime? // warned that it will rotate for inactivity (cleared when reassigned or worked)
   // Claude review (pasted in by hand from claude.ai; lib/brief.ts)
   claudeFit        String? // HIGH | MEDIUM | LOW
   claudeService    String?
@@ -397,4 +404,17 @@ model LeadImport {
   errors     Int      @default(0)
   createdBy  String
   createdAt  DateTime @default(now())
+}
+
+/// Fair hand-out of the lead pool (lib/distribution.ts): leads are split per score band, and when a band doesn't
+/// divide evenly the extra leads go to whoever has had the fewest extras in that band, so it evens out over runs.
+model LeadRotation {
+  id             String    @id @default(cuid()) @map("_id")
+  userId         String
+  band           String
+  extras         Int       @default(0)
+  received       Int       @default(0)
+  lastAssignedAt DateTime?
+
+  @@unique([userId, band])
 }

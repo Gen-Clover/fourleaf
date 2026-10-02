@@ -26,20 +26,34 @@ import * as ids from "@genclover/ids";
 import { OPEN_OPP_STAGES } from "../lib/b2b";
 import { changeStage, wakeLead } from "../lib/stages";
 import { notifyAssigned } from "../lib/tasks";
+import { moveLeads } from "../lib/distribution";
+import { assertLeadAccess } from "../lib/scope";
+import { recordAtWon } from "@genclover/incentives";
+import type { ServiceLine } from "@genclover/incentives/rules";
 
 const day = 86_400_000;
 const date = z.string({ error: "Pick a date" }).trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date");
 /** A date picked in the form, as 10:00 IST that day. */
 const istMorning = (d: string) => new Date(`${d}T10:00:00+05:30`);
 
-async function editor() {
+/** Someone working leads; with a lead id, only one they may see (lib/scope.ts). */
+async function editor(leadId?: string) {
   const user = await assertPermission("leads.edit");
+  if (leadId) await assertLeadAccess(user, leadId);
   return { user, by: { id: user.id, name: user.name } };
 }
 function done(id: string, message: string): Result {
   revalidatePath(`/leads/${id}`);
   revalidatePath("/leads/today");
   return { ok: true, message };
+}
+
+/** A call or meeting: whoever it's assigned to, or someone who may see the lead. */
+async function taskEditor(taskId: string) {
+  const e = await editor();
+  const task = await prisma.leadTask.findUniqueOrThrow({ where: { id: taskId }, select: { leadId: true, assigneeId: true } });
+  if (task.assigneeId !== e.user.id) await assertLeadAccess(e.user, task.leadId);
+  return e;
 }
 
 /** Snooze until a date: out of every queue, back in Today on that date (lib/stages.ts wakeSnoozed). */
@@ -56,7 +70,7 @@ async function snooze(id: string, until: Date, by: { id: string; name: string },
 /** Sort what they replied. Some answers move the lead on straight away. */
 export async function sortReply(id: string, input: { category: string; snoozeUntil?: string }): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await editor(id);
     const category = z.enum(Object.keys(REPLY_CATEGORIES) as [string, ...string[]]).parse(input.category);
     await prisma.lead.update({ where: { id }, data: { replyCategory: category } });
     if (category === "NOT_NOW") await snooze(id, istMorning(date.parse(input.snoozeUntil)), by, "they said not now");
@@ -71,7 +85,7 @@ export async function sortReply(id: string, input: { category: string; snoozeUnt
 /** Bring a snoozed lead back today, before its date. */
 export async function wakeNow(id: string): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await editor(id);
     await wakeLead(id, by);
     revalidatePath("/leads/snoozed");
     return done(id, "Back in Today.");
@@ -82,7 +96,7 @@ export async function wakeNow(id: string): Promise<Result> {
 
 export async function snoozeLead(id: string, until: string, note?: string): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await editor(id);
     await snooze(id, istMorning(date.parse(until)), by, note?.trim() || "not now");
     return done(id, "Snoozed.");
   } catch (e) {
@@ -93,7 +107,7 @@ export async function snoozeLead(id: string, until: string, note?: string): Prom
 /** Lost: why (required), who got the work (only if known) and, optionally, when to try again. */
 export async function markLost(id: string, input: { reason: string; competitor?: string; retryAt?: string }): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await editor(id);
     const reason = z.enum(LOST_REASONS as [string, ...string[]]).parse(input.reason);
     const competitor = input.competitor?.trim().slice(0, 120) || null;
     const retryAt = input.retryAt ? istMorning(date.parse(input.retryAt)) : null;
@@ -112,7 +126,7 @@ export async function markLost(id: string, input: { reason: string; competitor?:
 /** Not a fit: never a prospect. Searches keep the lead (same place ID), so it's never added again. */
 export async function markNotFit(id: string, input: { reason: string }): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await editor(id);
     const reason = z.enum(NOT_FIT_REASONS as [string, ...string[]]).parse(input.reason);
     await changeStage(id, "NOT_A_FIT", { by, reason, data: { notFitReason: reason, nextFollowUpAt: null } });
     return done(id, "Marked not a fit.");
@@ -123,7 +137,7 @@ export async function markNotFit(id: string, input: { reason: string }): Promise
 
 export async function markProposalSent(id: string, note?: string): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await editor(id);
     // Follow up on day 2 and day 5 after the proposal (set by hand after the first).
     await changeStage(id, "PROPOSAL", { by, reason: note?.trim() || null, data: { nextFollowUpAt: new Date(Date.now() + 2 * day) } });
     return done(id, "Proposal sent. Follow-up set for 2 days from now.");
@@ -138,7 +152,7 @@ export async function markProposalSent(id: string, note?: string): Promise<Resul
  */
 export async function markWon(id: string, input: { pkg: string; carePlan: string; addOns: string[]; reason: string; note?: string; value?: string; currency?: string }): Promise<Result> {
   try {
-    const { user, by } = await editor();
+    const { user, by } = await editor(id);
     const d = z
       .object({
         pkg: z.enum(PACKAGES as [string, ...string[]]),
@@ -181,8 +195,12 @@ export async function markWon(id: string, input: { pkg: string; carePlan: string
             createdBy: user.name,
           },
         });
-    await audit(user, "UPDATE", "Lead", id, `Won: ${d.pkg} (deal ${opp.code})`);
+    // The sales incentive is recorded now (who owned the lead, what was sold); onboarding decides it.
+    const market = lead.market === "US" ? "US" : "IN";
+    const inc = await recordAtWon({ opportunityId: opp.id, by, services: wonServices(d, opp.value, market), summary: `${title}${d.addOns.length ? ` + ${d.addOns.join(", ")}` : ""}` });
+    await audit(user, "UPDATE", "Lead", id, `Won: ${d.pkg} (deal ${opp.code}, incentive ${inc.code})`);
     revalidatePath("/leads/won");
+    revalidatePath("/leads/incentives");
     revalidatePath("/clients/onboarding");
     return done(id, `Won! Deal ${opp.code} is waiting for onboarding.`);
   } catch (e) {
@@ -190,10 +208,25 @@ export async function markWon(id: string, input: { pkg: string; carePlan: string
   }
 }
 
+/**
+ * What was sold, as incentive service lines: the package (at the deal value given, else its list price), the care
+ * plan (monthly, first month counts) and add-ons (priced at onboarding). India list prices are the strategy doc's;
+ * US deals are priced at onboarding.
+ */
+const LIST_PRICE_INR: Record<string, number> = { Starter: 30000, Growth: 40000, Premium: 50000 };
+const CARE_PRICE_INR: Record<string, number> = { "Care Basic": 2500, "Care Plus": 3500, "Care Pro": 5000 };
+function wonServices(d: { pkg: string; carePlan: string; addOns: string[] }, value: number | null, market: "IN" | "US"): ServiceLine[] {
+  const india = market === "IN";
+  const lines: ServiceLine[] = [{ key: "PACKAGE", label: `Website: ${d.pkg}`, kind: "ONE_TIME", value: value ?? (india ? (LIST_PRICE_INR[d.pkg] ?? null) : null) }];
+  if (d.carePlan !== "None") lines.push({ key: "CARE", label: d.carePlan, kind: "MONTHLY", value: india ? (CARE_PRICE_INR[d.carePlan] ?? null) : null });
+  for (const a of d.addOns) lines.push({ key: `ADDON:${a}`, label: a, kind: "ONE_TIME", value: null });
+  return lines;
+}
+
 /** Correct the stage by hand (moves that need details have their own forms). */
 export async function setStage(id: string, stage: string): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await editor(id);
     if (["WON", "LOST", "NOT_A_FIT", "SNOOZED"].includes(stage)) throw new Error("Use the Won, Lost, Not a fit or Snooze buttons: they ask for the details");
     if (!["NEW", "QUALIFIED", "CONTACTED", "REPLIED", "MEETING", "PROPOSAL"].includes(stage)) throw new Error("Unknown stage");
     await changeStage(id, stage, { by, reason: "set by hand", data: { snoozeUntil: null, retryAt: null } });
@@ -205,7 +238,7 @@ export async function setStage(id: string, stage: string): Promise<Result> {
 
 export async function setFollowUp(id: string, on: string | null): Promise<Result> {
   try {
-    await editor();
+    await editor(id);
     await prisma.lead.update({ where: { id }, data: { nextFollowUpAt: on ? istMorning(date.parse(on)) : null } });
     return done(id, "Follow-up saved.");
   } catch (e) {
@@ -213,20 +246,19 @@ export async function setFollowUp(id: string, on: string | null): Promise<Result
   }
 }
 
-/** Assign leads to a person (null = unassigned). */
-export async function assignOwner(ids: string[], userId: string | null): Promise<Result> {
+/**
+ * Move leads to a person (null = back to the pool). Owners: anyone's leads, won ones too. A manager the owner allows:
+ * their team's leads (not won) within their team. Nobody else (lib/distribution.ts checkMove).
+ */
+export async function assignOwner(ids: string[], userId: string | null, note?: string): Promise<Result> {
   try {
-    const { user, by } = await editor();
+    const { user } = await editor();
     const leadIds = z.array(z.string()).min(1, "Select some leads").max(500).parse(ids);
-    const owner = userId ? await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, name: true } }) : null;
-    await prisma.lead.updateMany({ where: { id: { in: leadIds } }, data: { ownerId: owner?.id ?? null, ownerName: owner?.name ?? null } });
-    await prisma.leadActivity.createMany({
-      data: leadIds.map((leadId) => ({ leadId, type: "SYSTEM", text: owner ? `Assigned to ${owner.name}` : "Unassigned", byId: by.id, byName: by.name, service: null, step: null })),
-    });
-    await audit(user, "UPDATE", "Lead", null, `${leadIds.length} lead(s) assigned to ${owner?.name ?? "nobody"}`);
+    const n = await moveLeads(user, leadIds, userId, note?.trim() || undefined);
     revalidatePath("/leads/list");
+    revalidatePath("/leads/distribute");
     for (const id of leadIds.slice(0, 1)) revalidatePath(`/leads/${id}`);
-    return { ok: true, message: `${leadIds.length} lead(s) ${owner ? `assigned to ${owner.name}` : "unassigned"}.` };
+    return { ok: true, message: `${n} lead(s) ${userId ? "moved" : "back in the pool"}.` };
   } catch (e) {
     return { ok: false, message: errMsg(e) };
   }
@@ -246,7 +278,7 @@ const TaskInput = z.object({
 /** Schedule a call-back, meeting or visit. A meeting or visit moves the lead to "Call / meeting". */
 export async function scheduleTask(id: string, input: z.input<typeof TaskInput>): Promise<Result> {
   try {
-    const { user, by } = await editor();
+    const { user, by } = await editor(id);
     const d = TaskInput.parse(input);
     const dueAt = new Date(`${d.dueAt}:00+05:30`); // entered in IST
     if (dueAt.getTime() < Date.now() - 60_000) throw new Error("Pick a time in the future");
@@ -276,7 +308,7 @@ const Notes = z.object({ needs: z.string().max(1000), budget: z.string().max(300
 /** Record how the call or meeting went (notes template), then move the lead on accordingly. */
 export async function completeTask(taskId: string, input: { outcome: string; notes: z.input<typeof Notes>; snoozeUntil?: string }): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await taskEditor(taskId);
     const outcome = z.enum(Object.keys(MEETING_OUTCOMES) as [string, ...string[]]).parse(input.outcome);
     const notes = Notes.parse(input.notes);
     const task = await prisma.leadTask.update({ where: { id: taskId }, data: { status: "DONE", outcome, notes: JSON.stringify(notes), doneAt: new Date() } });
@@ -308,7 +340,7 @@ export async function completeTask(taskId: string, input: { outcome: string; not
 
 export async function cancelTask(taskId: string): Promise<Result> {
   try {
-    const { by } = await editor();
+    const { by } = await taskEditor(taskId);
     const task = await prisma.leadTask.update({ where: { id: taskId }, data: { status: "CANCELLED", doneAt: new Date() } });
     await prisma.leadActivity.create({ data: { leadId: task.leadId, type: "SYSTEM", text: `${TASK_TYPES[task.type]} cancelled`, byId: by.id, byName: by.name } });
     revalidatePath("/leads/tasks");

@@ -7,6 +7,7 @@ import { TASK_TYPES } from "../../lib/services";
 import { googleCalendarLink, icsFile } from "../../lib/tasks";
 import { endOfTodayIst } from "../../lib/time";
 import { TaskActions } from "./TaskActions";
+import { leadRelationScope } from "../../lib/scope";
 
 const time = (d: Date) => d.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
 
@@ -19,7 +20,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const everyone = sp.who === "all";
   const tasks = await prisma.leadTask.findMany({
-    where: { status: "OPEN", ...(everyone ? {} : { assigneeId: user.id }) },
+    // "Everyone": the calls and meetings on leads this person may see (their team's for managers, all for owners).
+    where: { status: "OPEN", ...(everyone ? await leadRelationScope(user) : { assigneeId: user.id }) },
     orderBy: { dueAt: "asc" },
     take: 300,
     include: { lead: { select: { id: true, name: true, code: true, phone: true, intlPhone: true, address: true, stage: true } } },

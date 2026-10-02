@@ -21,7 +21,16 @@ export const leadFinderNav: ToolNav = {
         { href: "/leads/tasks", label: "Calls & meetings", icon: "☎", description: "Call-backs, meetings and visits: mine or the team's" },
         { href: "/leads/snoozed", label: "Snoozed", icon: "☾", description: "“Not now” leads and the date each comes back" },
         { href: "/leads/won", label: "Won", icon: "★", description: "Won deals waiting for onboarding" },
+        { href: "/leads/distribute", label: "Distribute", icon: "⇄", description: "Hand out the lead pool, see idle leads, move leads" },
         { href: "/leads/list?stuck=1", label: "Stuck deals", icon: "!", description: "Replied, meeting or proposal with no movement" },
+      ],
+    },
+    {
+      title: "Incentives",
+      items: [
+        { href: "/leads/incentives", label: "Incentives", icon: "₹", description: "Earned on won deals: where each deal is, and when it's paid" },
+        { href: "/leads/incentives/review", label: "Incentive review", icon: "⚑", description: "Approvals, and what changed between Won, onboarding and payment" },
+        { href: "/leads/incentives/team", label: "Sales team", icon: "☷", description: "Who manages whom, who is on incentives, rates and hold period" },
       ],
     },
     {

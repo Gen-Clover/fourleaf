@@ -305,6 +305,7 @@ model Invoice {
   placeOfSupply String?
   sac           String? // services accounting code, e.g. 998314
   notes         String?
+  incentiveId   String? // SalesIncentive this invoice counts towards (linked on the first receipt, or by hand)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   lines         InvoiceLine[]

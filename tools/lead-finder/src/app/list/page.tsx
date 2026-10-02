@@ -7,6 +7,7 @@ import { baseWhere, listWhere, orderBy, parseFilters, scoreField } from "../../l
 import { MARKETS, MARKET_KEYS } from "../../lib/markets";
 import { SERVICES } from "../../lib/services";
 import { getLfSettings } from "../../lib/settings";
+import { canGenerateLeads, leadScope, moveTargets, ownerOptions } from "../../lib/scope";
 import FilterBar from "./FilterBar";
 import LeadTable from "./LeadTable";
 import MarketToggle from "../MarketToggle";
@@ -18,8 +19,10 @@ export default async function LeadListPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const f = parseFilters(sp, user.id);
   const settings = await getLfSettings();
-  const base = baseWhere(f, settings);
-  const where = listWhere(f, settings);
+  // Everyone sees only the leads they may (lib/scope.ts): their own, their team's, or all for owners.
+  const scope = await leadScope(user);
+  const base = { AND: [scope, baseWhere(f, settings)] };
+  const where = { AND: [scope, listWhere(f, settings)] };
 
   const [total, leads, niches, search, tabCounts, withBranches, users] = await Promise.all([
     prisma.lead.count({ where }),
@@ -28,8 +31,8 @@ export default async function LeadListPage({ searchParams }: { searchParams: Pro
     f.search ? prisma.leadSearch.findUnique({ where: { id: f.search }, select: { nicheLabel: true, areaLabel: true } }) : null,
     Promise.all([prisma.lead.count({ where: base }), ...SERVICES.map((s) => prisma.lead.count({ where: { AND: [base, { [s.field]: { gt: 0 } }] } }))]),
     // Same filters with every branch shown: the difference is how many other branches the list hides.
-    f.branches ? null : prisma.lead.count({ where: listWhere({ ...f, branches: "show" }, settings) }),
-    prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    f.branches ? null : prisma.lead.count({ where: { AND: [scope, listWhere({ ...f, branches: "show" }, settings)] } }),
+    ownerOptions(user),
   ]);
   const hiddenBranches = withBranches == null ? 0 : withBranches - total;
 
@@ -56,7 +59,7 @@ export default async function LeadListPage({ searchParams }: { searchParams: Pro
           <>
             <MarketToggle markets={MARKET_KEYS.map((k) => ({ key: k, label: MARKETS[k].label }))} />
             {can(user.role, "leads.edit") && <a href={`/api/leads/export${exportQuery ? `?${exportQuery}` : ""}`} className="btn-secondary">Export CSV</a>}
-            {can(user.role, "leads.edit") && <Link href="/leads/find" className="btn-primary">+ New search</Link>}
+            {(await canGenerateLeads(user)) && <Link href="/leads/find" className="btn-primary">+ New search</Link>}
           </>
         }
       />
@@ -85,7 +88,7 @@ export default async function LeadListPage({ searchParams }: { searchParams: Pro
 
       <LeadTable
         canEdit={can(user.role, "leads.edit")}
-        users={users}
+        users={await moveTargets(user)}
         showService={!f.service}
         query={exportQuery}
         total={total}

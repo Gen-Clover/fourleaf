@@ -39,40 +39,47 @@ model Setting {
 }
 
 model Client {
-  id               String          @id @default(cuid()) @map("_id")
-  number           String          @unique // Client ID, GC-YYYY-NNNN (system, never changes)
-  code             String          @unique // Client code, e.g. ABR (chosen at onboarding, then locked): project IDs, Jira, folders, emails
-  name             String
-  contactName      String?
-  email            String?
-  phone            String?
-  country          String?         @default("USA")
-  city             String?
-  timezone         String?
-  website          String?
-  billingAddress   String?
-  notes            String?
+  id                 String          @id @default(cuid()) @map("_id")
+  number             String          @unique // Client ID, GC-YYYY-NNNN (system, never changes)
+  code               String          @unique // Client code, e.g. ABR (chosen at onboarding, then locked): project IDs, Jira, folders, emails
+  name               String
+  contactName        String?
+  email              String?
+  phone              String?
+  country            String?         @default("USA")
+  city               String?
+  timezone           String?
+  website            String?
+  billingAddress     String?
+  notes              String?
   // Tax and billing (India GST; export clients bill in USD under LUT)
-  legalName        String?
-  gstin            String?
-  pan              String?
-  state            String? // Indian state for place of supply, e.g. Punjab
-  currency         String          @default("USD") // INR | USD
-  paymentTermsDays Int?
-  industry         String?
+  legalName          String?
+  gstin              String?
+  pan                String?
+  state              String? // Indian state for place of supply, e.g. Punjab
+  currency           String          @default("USD") // INR | USD
+  paymentTermsDays   Int?
+  industry           String?
+  // Business identity, so the same business can't be onboarded twice (packages/incentives/src/identity.ts).
+  // India: CIN (company) or LLPIN (LLP), plus GSTIN / PAN above; USA: EIN. Entered and checked at onboarding;
+  // once the client is active only an owner can change them.
+  cin                String?
+  ein                String?
+  identityVerifiedBy String?
+  identityVerifiedAt DateTime?
   // Onboarding (Clients & Agreements tool). status: ONBOARDING | ACTIVE | INACTIVE
-  status           String          @default("ACTIVE")
-  onboardedAt      DateTime?
-  accountManager   String?
-  checklist        String? // JSON { itemKey: true }
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  projects         Project[]
-  invoices         Invoice[]
-  leads            Lead[]
-  contacts         ClientContact[]
-  agreements       Agreement[]
-  opportunities    Opportunity[]
+  status             String          @default("ACTIVE")
+  onboardedAt        DateTime?
+  accountManager     String?
+  checklist          String? // JSON { itemKey: true }
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  projects           Project[]
+  invoices           Invoice[]
+  leads              Lead[]
+  contacts           ClientContact[]
+  agreements         Agreement[]
+  opportunities      Opportunity[]
 }
 
 model AuditLog {

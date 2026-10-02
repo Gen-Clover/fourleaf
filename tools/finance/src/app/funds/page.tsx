@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@genclover/ui";
 import { can, requirePermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
-import { PASS_THROUGH, fundBalances } from "../../lib/treasury";
+import { INCENTIVE_FUND, PASS_THROUGH, fundBalances } from "../../lib/treasury";
 import { ymd } from "../../lib/finance";
 import { date, inr } from "@genclover/ui/format";
 import MovementForm from "./MovementForm";
@@ -37,7 +37,7 @@ export default async function FundsPage({ searchParams }: { searchParams: Promis
           <Link key={f.key} href={f.key === sp.fund ? "/funds" : `/funds?fund=${f.key}`} className={`card p-3 transition hover:border-brand/40 ${f.key === sp.fund ? "border-brand bg-brand-soft" : ""}`}>
             <div className="truncate text-xs font-medium text-neutral-500" title={f.name}>{f.name}</div>
             <div className={`mt-1 text-lg font-semibold tabular-nums ${f.balance < 0 ? "text-red-600" : "text-ink"}`}>{inr(f.balance)}</div>
-            <div className="text-[11px] text-neutral-500">{f.percent ? `${f.percent}% of receipts` : f.key === PASS_THROUGH ? "Clearing" : "Not funded by policy"}</div>
+            <div className="text-[11px] text-neutral-500">{f.percent ? `${f.percent}% of receipts` : f.key === PASS_THROUGH ? "Clearing" : f.key === INCENTIVE_FUND ? "Held from receipts, paid in pay runs" : "Not funded by policy"}</div>
           </Link>
         ))}
       </div>

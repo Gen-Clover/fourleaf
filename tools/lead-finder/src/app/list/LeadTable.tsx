@@ -118,11 +118,12 @@ export default function LeadTable({
                 <option value="">Not a fit…</option>
                 {NOT_FIT_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
-              <select className="input-sm w-auto" value="" disabled={pending} onChange={(e) => e.target.value && assign(e.target.value)} aria-label="Assign an owner">
-                <option value="">Assign to…</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                <option value="none">Nobody (unassign)</option>
-              </select>
+              {users.length > 0 && (
+                <select className="input-sm w-auto" value="" disabled={pending} onChange={(e) => e.target.value && assign(e.target.value)} aria-label="Move to">
+                  <option value="">Move to…</option>
+                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              )}
               <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run("SPEED")}>Speed test</button>
               <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run("RECHECK")}>Re-check websites</button>
               <button className="btn-secondary btn-sm" disabled={pending} onClick={() => refresh("selected")}>Refresh Google data</button>

@@ -6,13 +6,15 @@
 //   2. Cost: salaries, cost rates, the internal allocation split. Owners, CFO and HR (salaries) only.
 //   3. Company totals: revenue, pipeline value, margins, cash. Owners, CFO and the accountant only.
 
-export const ROLES = ["OWNER", "CFO", "SALES", "ONBOARDING", "DELIVERY", "HR", "TEAM", "ACCOUNTANT"] as const;
+export const ROLES = ["OWNER", "ADMIN", "CFO", "SALES_MANAGER", "SALES", "ONBOARDING", "DELIVERY", "HR", "TEAM", "ACCOUNTANT"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
-  OWNER: { label: "Owner", description: "Everything, including users, settings and every figure" },
+  OWNER: { label: "Owner", description: "Everything, including users, settings, every figure, and handing out and moving leads" },
+  ADMIN: { label: "Admin", description: "Users and roles only (can't make anyone an owner)" },
   CFO: { label: "CFO", description: "Finance: invoices, payments, pay runs, costs, margins, reports, approvals, compliance" },
-  SALES: { label: "Sales", description: "Leads, accounts and opportunities to won. Sees prices and their own deal values; no costs or company totals" },
+  SALES_MANAGER: { label: "Sales manager", description: "Sales, plus their team's leads and incentives. Searches, imports and moving leads only if the owner allows it (Sales team)" },
+  SALES: { label: "Sales", description: "Their own leads, accounts and opportunities to won. Sees prices, their own deal values and incentives; no costs or company totals" },
   ONBOARDING: { label: "Onboarding", description: "Won deals to clients: client records, agreements (NDA, MSA, SOW), project set-up. No amounts" },
   DELIVERY: { label: "Delivery manager", description: "Projects, scope, milestones, resources, timesheet approval, issues. No money" },
   HR: { label: "HR", description: "People: employees, contractors, documents, work orders, salaries and pay runs" },
@@ -21,8 +23,12 @@ export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
 };
 
 export const PERMISSIONS = {
-  admin: "Users, roles, the audit log and the decision register",
-  "leads.view": "Lead Finder: leads, accounts, opportunities, dashboard and reports",
+  admin: "Owner decisions: the audit log, the decision register, deleting clients and projects",
+  "users.manage": "Users and roles",
+  "leads.view": "Lead Finder: their own leads, accounts, opportunities, dashboard and reports",
+  "leads.all": "Every lead, whoever owns it",
+  "leads.team": "Their team's leads (sales managers)",
+  "leads.manage": "Hand out the lead pool, move anyone's leads (won ones too), lead rotation settings",
   "leads.edit": "Work leads and opportunities: messages, stages, calls, searches, imports",
   "leads.settings": "Lead Finder settings",
   "leads.won": "Won deals waiting for onboarding",
@@ -54,6 +60,10 @@ export const PERMISSIONS = {
   "compliance.edit": "Update the compliance calendar and record filings",
   "issues.view": "Issues and escalations",
   "issues.edit": "Raise and work on issues",
+  "incentives.own": "Their own sales incentives (and their team's, for sales managers)",
+  "incentives.propose": "Record the sales credit when onboarding a won deal (an approver confirms it)",
+  "incentives.approve": "Approve sales incentives and see every one",
+  "incentives.manage": "Correct any incentive at any stage; sales team set-up and incentive settings",
 } as const;
 export type Permission = keyof typeof PERMISSIONS;
 
@@ -61,13 +71,15 @@ const ALL = Object.keys(PERMISSIONS) as Permission[];
 
 const GRANTS: Record<Role, readonly Permission[]> = {
   OWNER: ALL,
+  ADMIN: ["users.manage"],
   CFO: [
-    "leads.view", "deals.all", "prices.view", "clients.view", "clients.edit", "agreements.view", "agreements.edit", "projects.view", "projects.create",
+    "leads.view", "leads.all", "deals.all", "prices.view", "clients.view", "clients.edit", "agreements.view", "agreements.edit", "projects.view", "projects.create",
     "hours.all", "people.view", "cost.view", "cost.edit", "payroll.view", "payroll.edit", "finance.view", "finance.edit", "finance.approve",
-    "finance.settings", "compliance.view", "compliance.edit", "issues.view", "issues.edit",
+    "finance.settings", "compliance.view", "compliance.edit", "issues.view", "issues.edit", "incentives.propose", "incentives.approve",
   ],
-  SALES: ["leads.view", "leads.edit", "deals.own", "prices.view", "clients.view", "issues.view", "issues.edit"],
-  ONBOARDING: ["leads.won", "clients.view", "clients.edit", "agreements.view", "agreements.edit", "projects.view", "projects.create", "issues.view", "issues.edit"],
+  SALES_MANAGER: ["leads.view", "leads.team", "leads.edit", "deals.own", "prices.view", "clients.view", "issues.view", "issues.edit", "incentives.own"],
+  SALES: ["leads.view", "leads.edit", "deals.own", "prices.view", "clients.view", "issues.view", "issues.edit", "incentives.own"],
+  ONBOARDING: ["leads.won", "clients.view", "clients.edit", "agreements.view", "agreements.edit", "projects.view", "projects.create", "issues.view", "issues.edit", "incentives.propose"],
   DELIVERY: [
     "clients.view", "agreements.view", "projects.view", "projects.create", "projects.edit", "resources.manage", "hours.all", "hours.own", "hours.approve",
     "people.view", "issues.view", "issues.edit",
@@ -77,8 +89,11 @@ const GRANTS: Record<Role, readonly Permission[]> = {
   ACCOUNTANT: ["finance.view", "cost.view", "payroll.view", "clients.view", "people.view", "compliance.view", "compliance.edit"],
 };
 
-/** Accounts created before the named roles: ADMIN became Owner, EDITOR Sales, VIEWER Team member. */
-const LEGACY: Record<string, Role> = { ADMIN: "OWNER", EDITOR: "SALES", VIEWER: "TEAM" };
+/**
+ * Accounts created before the named roles: EDITOR became Sales, VIEWER Team member. (The old ADMIN became Owner in
+ * 2026; db:push renamed every such account, and ADMIN is now its own, limited role.)
+ */
+const LEGACY: Record<string, Role> = { EDITOR: "SALES", VIEWER: "TEAM" };
 
 export function normalizeRole(role: string | null | undefined): Role {
   if (role && (ROLES as readonly string[]).includes(role)) return role as Role;
@@ -101,14 +116,21 @@ export const canAny = (role: string, permissions: readonly Permission[]) => perm
  */
 const ROUTES: [RegExp, Permission[]][] = [
   // Portal settings and the approvals inbox
-  [/^\/admin\/(users|audit)(\/|$)/, ["admin"]],
+  [/^\/admin\/users(\/|$)/, ["users.manage"]],
+  [/^\/admin\/audit(\/|$)/, ["admin"]],
   [/^\/admin(\/|$)/, ["finance.settings"]],
   [/^\/approvals(\/|$)/, ["finance.approve", "hours.approve", "resources.manage"]],
 
   // Lead Finder (sales)
+  [/^\/leads\/incentives\/team(\/|$)/, ["incentives.manage"]],
+  [/^\/leads\/incentives\/review(\/|$)/, ["incentives.approve", "incentives.manage"]],
+  [/^\/leads\/incentives(\/|$)/, ["incentives.own", "incentives.approve", "incentives.manage"]],
   [/^\/leads\/won(\/|$)/, ["leads.view", "leads.won"]],
   [/^\/leads\/settings(\/|$)/, ["leads.settings"]],
-  [/^\/leads\/(find|new|claude|today|import)(\/|$)/, ["leads.edit"]],
+  // Searches and imports: the owner, and sales managers the owner allows (checked per person on the page).
+  [/^\/leads\/(find|import|searches)(\/|$)/, ["leads.manage", "leads.team"]],
+  [/^\/leads\/distribute(\/|$)/, ["leads.manage", "leads.team"]],
+  [/^\/leads\/(new|claude|today)(\/|$)/, ["leads.edit"]],
   [/^\/leads$/, ["leads.view"]],
   [/^\/leads\/opportunities\/[^/]+$/, ["leads.view", "leads.won"]], // a won opportunity is part of the hand-over
   [/^\/leads\/c[a-z0-9]{20,}$/, ["leads.view", "leads.won"]], // a lead; won-only roles see won leads only

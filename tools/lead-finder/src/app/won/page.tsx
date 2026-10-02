@@ -5,6 +5,7 @@ import { prisma } from "@genclover/db";
 import { date, money } from "@genclover/ui/format";
 import { OPP_MODELS } from "../../lib/b2b";
 import { visibleDealValues } from "../../lib/dealAccess";
+import { leadScope, opportunityScope } from "../../lib/scope";
 
 /**
  * Won deals. Winning only marks the deal; Clients → Onboarding turns it into a client (Client ID, agreements,
@@ -14,18 +15,21 @@ export default async function WonPage({ searchParams }: { searchParams: Promise<
   const user = await requireUser();
   const sp = await searchParams;
   const onboarded = sp.show === "onboarded";
+  // Sellers see their own won deals, managers their team's; owners, the CFO and onboarding see all.
+  const os = await opportunityScope(user);
+  const ls = await leadScope(user);
   const [opps, oldLeads, waiting, done] = await Promise.all([
     prisma.opportunity.findMany({
-      where: { stage: "WON", onboardedAt: onboarded ? { not: null } : null },
+      where: { ...os, stage: "WON", onboardedAt: onboarded ? { not: null } : null },
       orderBy: { wonAt: "desc" },
       take: 500,
       omit: { value: true },
       include: { lead: { select: { id: true, name: true, code: true, wonReason: true } }, client: { select: { id: true, number: true, code: true, name: true } } },
     }),
     // Won before opportunities existed (no deal recorded): still waiting, shown here too.
-    onboarded ? [] : prisma.lead.findMany({ where: { stage: "WON", clientId: null, opportunities: { none: {} } }, select: { id: true, name: true, code: true, wonAt: true, wonPackage: true, wonCarePlan: true, wonReason: true, ownerName: true } }),
-    prisma.opportunity.count({ where: { stage: "WON", onboardedAt: null } }),
-    prisma.opportunity.count({ where: { stage: "WON", onboardedAt: { not: null } } }),
+    onboarded ? [] : prisma.lead.findMany({ where: { ...ls, stage: "WON", clientId: null, opportunities: { none: {} } }, select: { id: true, name: true, code: true, wonAt: true, wonPackage: true, wonCarePlan: true, wonReason: true, ownerName: true } }),
+    prisma.opportunity.count({ where: { ...os, stage: "WON", onboardedAt: null } }),
+    prisma.opportunity.count({ where: { ...os, stage: "WON", onboardedAt: { not: null } } }),
   ]);
   const values = await visibleDealValues(user, opps.map((o) => o.id));
   const showValue = can(user.role, "deals.all") || can(user.role, "deals.own");

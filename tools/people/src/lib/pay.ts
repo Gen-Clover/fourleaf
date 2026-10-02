@@ -4,12 +4,14 @@
 //   HOURLY     approved hours × rate (costInr = ₹ per hour), across any number of projects
 //   RETAINER   fixed monthly fee for reserved capacity, across projects (costInr = monthly fee)
 //   FIXED_FEE  paid per work order (the fee on each work order), across projects
+//   COMMISSION sales incentives only (packages/incentives); salaried sellers also get theirs in the same pay run
 
 export const PAY_MODELS: Record<string, { label: string; costLabel: string; basis: "MONTHLY" | "HOURLY"; hint: string }> = {
   SALARY: { label: "Salary (employee)", costLabel: "Monthly salary / CTC ₹", basis: "MONTHLY", hint: "Paid the same every month; hours only measure project cost" },
   HOURLY: { label: "Hourly", costLabel: "Rate ₹ per hour", basis: "HOURLY", hint: "Paid for approved hours on any project" },
   RETAINER: { label: "Monthly retainer (contractor)", costLabel: "Monthly fee ₹", basis: "MONTHLY", hint: "Fixed monthly fee, deployed on any project within the agreed capacity" },
   FIXED_FEE: { label: "Fixed fee per work order", costLabel: "—", basis: "MONTHLY", hint: "Paid the fee set on each work order" },
+  COMMISSION: { label: "Sales incentive only", costLabel: "—", basis: "MONTHLY", hint: "No fixed pay: paid their earned sales incentives in each pay run (Lead Finder → Incentives)" },
 };
 
 export const PERSON_TYPES: Record<string, string> = { EMPLOYEE: "Employee", CONTRACTOR: "Contractor" };

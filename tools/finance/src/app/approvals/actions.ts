@@ -16,6 +16,10 @@ async function approvePayRun(payRunId: string) {
   const salaries = cats.find((c) => c.name.startsWith("Salaries")) ?? cats.find((c) => c.bucketKey === "delivery");
   const contractors = cats.find((c) => c.name.startsWith("Contractor")) ?? salaries;
   if (!salaries || !contractors) throw new Error("Create a Delivery expense category for salaries first");
+  // Sales incentives are paid from the incentive fund they were held in at each receipt.
+  const incentiveCat = run.lines.some((l) => l.kind === "INCENTIVE")
+    ? (cats.find((c) => c.bucketKey === "incentive") ?? (await prisma.expenseCategory.create({ data: { name: "Sales incentives", bucketKey: "incentive", sortOrder: 90 } })))
+    : null;
   const date = addDays(monthRange(run.month).to, -1);
   for (const l of run.lines) {
     const deductions = [l.tds ? `TDS ₹${Math.round(l.tds)}` : null, l.otherDeductions ? `other deductions ₹${Math.round(l.otherDeductions)}` : null].filter(Boolean).join(", ");
@@ -24,7 +28,7 @@ async function approvePayRun(payRunId: string) {
         date,
         vendor: l.person.name,
         description: `${run.code} · ${l.description}${deductions ? ` · ${deductions} withheld; net ₹${Math.round(l.net)}` : ""}`,
-        categoryId: l.person.type === "EMPLOYEE" ? salaries.id : contractors.id,
+        categoryId: l.kind === "INCENTIVE" && incentiveCat ? incentiveCat.id : l.person.type === "EMPLOYEE" ? salaries.id : contractors.id,
         amount: l.gross,
         amountInr: l.gross,
         gstInr: l.gst,

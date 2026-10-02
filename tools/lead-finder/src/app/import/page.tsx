@@ -4,9 +4,12 @@ import { prisma } from "@genclover/db";
 import { date } from "@genclover/ui/format";
 import { IMPORT_SOURCES } from "../../lib/b2b";
 import ImportClient, { UndoImportButton } from "./ImportClient";
+import GenerateGate from "../../lib/GenerateGate";
+import { canGenerateLeads } from "../../lib/scope";
 
 export default async function ImportPage() {
-  await requirePermission("leads.edit");
+  const user = await requirePermission("leads.edit");
+  if (!(await canGenerateLeads(user))) return <GenerateGate title="Import a list" />;
   const imports = await prisma.leadImport.findMany({ orderBy: { createdAt: "desc" }, take: 20 });
   return (
     <>

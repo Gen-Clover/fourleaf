@@ -8,6 +8,7 @@ import { OPP_MODELS, serviceLabel } from "../../../lib/b2b";
 import { canSeeDeal } from "../../../lib/dealAccess";
 import { deleteOpportunity } from "../../salesActions";
 import OpportunityForm from "../OpportunityForm";
+import { opportunityScope, seesAllLeads } from "../../../lib/scope";
 
 export default async function OpportunityPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -20,6 +21,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
   if (!o) notFound();
   // Onboarding sees won deals (what was sold), nothing else.
   if (!can(user.role, "leads.view") && o.stage !== "WON") notFound();
+  if (can(user.role, "leads.view") && !seesAllLeads(user) && !(await prisma.opportunity.count({ where: { id, ...(await opportunityScope(user)) } }))) notFound();
   const showValue = canSeeDeal(user, o);
   const value = showValue ? (await prisma.opportunity.findUniqueOrThrow({ where: { id }, select: { value: true } })).value : null;
   const canEdit = can(user.role, "leads.edit");

@@ -13,7 +13,8 @@ import { money, monthLabel } from "@genclover/ui/format";
 import { defaultTax, inIndia, TAX_TYPES } from "../../lib/tax";
 import { nextInvoiceNumber, syncInvoice, withTx } from "../../lib/invoicing";
 import { type Result, fail } from "@genclover/ui/result";
-import { allocationFor } from "../../lib/treasury";
+import * as incentives from "@genclover/incentives";
+import { allocationFor, INCENTIVE_FUND } from "../../lib/treasury";
 
 const draftNumber = () => `DRAFT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
@@ -214,19 +215,24 @@ export async function recordPayment(invoiceId: string, input: unknown): Promise<
     const balance = inv.total - paidUsd(inv.payments);
     if (d.amountUsd > balance + 0.01) throw new Error(`Amount exceeds the balance of ${money(balance, inv.currency, 2)}`);
     if (d.inrReceived <= 0 && d.tdsInr <= 0) throw new Error("Enter the ₹ credited to the bank (or the TDS deducted)");
+    // A sales incentive earned on this receipt (first service of a new client) is held in its own fund.
+    const date = utcDay(d.date);
+    const incentive = await incentives.previewReceipt(inv, { ...d, date });
     // Allocation engine: cash received (₹ credited) is split into funds by the active policy.
-    const alloc = await allocationFor(d.inrReceived, inv);
+    const alloc = await allocationFor(d.inrReceived, inv, incentive?.totalInr ?? 0);
     const res = await withTx(async (tx) => {
-      const pay = await tx.payment.create({ data: { ...d, date: utcDay(d.date), reference: d.reference || null, invoiceId } });
+      const pay = await tx.payment.create({ data: { ...d, date, reference: d.reference || null, invoiceId } });
       await tx.fundEntry.createMany({
-        data: alloc.lines.map((l) => ({ date: pay.date, fundKey: l.key, amountInr: l.amount, type: "ALLOCATION", paymentId: pay.id, policy: alloc.policy, note: `${inv.number} receipt`, createdBy: user.name })),
+        data: alloc.lines.map((l) => ({ date: pay.date, fundKey: l.key, amountInr: l.amount, type: "ALLOCATION", paymentId: pay.id, policy: alloc.policy, note: `${inv.number} receipt${l.key === INCENTIVE_FUND && incentive ? ` (${incentive.code})` : ""}`, createdBy: user.name })),
       });
+      if (incentive) await incentives.writeReceipt(tx, incentive, { paymentId: pay.id, invoiceId, invoiceNumber: inv.number, date, by: user });
       return syncInvoice(tx, invoiceId);
     });
-    await audit(user, "CREATE", "Payment", invoiceId, `${inv.number}: settled ${money(d.amountUsd, inv.currency, 2)} = ₹${d.inrReceived.toFixed(0)} received (charges ₹${d.bankChargesInr.toFixed(0)}, TDS ₹${d.tdsInr.toFixed(0)})`);
+    await audit(user, "CREATE", "Payment", invoiceId, `${inv.number}: settled ${money(d.amountUsd, inv.currency, 2)} = ₹${d.inrReceived.toFixed(0)} received (charges ₹${d.bankChargesInr.toFixed(0)}, TDS ₹${d.tdsInr.toFixed(0)})${incentive ? `; sales incentive ${incentive.code} ₹${incentive.totalInr.toFixed(0)} held` : ""}`);
     touch(invoiceId);
     revalidatePath("/finance");
-    return { ok: true, message: res.status === "PAID" ? "Payment recorded — invoice fully paid." : "Payment recorded." };
+    const held = incentive ? ` Sales incentive ${incentive.code}: ₹${Math.round(incentive.totalInr).toLocaleString("en-IN")} held for the team.` : "";
+    return { ok: true, message: (res.status === "PAID" ? "Payment recorded — invoice fully paid." : "Payment recorded.") + held };
   } catch (e) {
     return fail(e);
   }
@@ -235,6 +241,8 @@ export async function recordPayment(invoiceId: string, input: unknown): Promise<
 export async function deletePayment(paymentId: string) {
   const user = await assertPermission("finance.edit");
   const pay = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { invoice: true } });
+  // Incentive earned on this receipt: removed if not paid yet, else recovered in the next pay run.
+  await incentives.receiptDeleted(paymentId, user);
   await withTx(async (tx) => {
     await tx.payment.delete({ where: { id: paymentId } });
     await syncInvoice(tx, pay.invoiceId);

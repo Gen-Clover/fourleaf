@@ -13,6 +13,7 @@
     "@genclover/auth": "*",
     "@genclover/db": "*",
     "@genclover/ids": "*",
+    "@genclover/incentives": "*",
     "@genclover/ui": "*",
     "jszip": "^3.10.2",
     "recharts": "^3.10.1",

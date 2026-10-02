@@ -1,0 +1,20 @@
+{
+  "name": "@genclover/incentives",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sales incentives shared by Lead Finder, Clients and Finance: deal tagging at Won, approval at onboarding, accrual on receipts, wallet, pay runs, owner change report; business identity checks",
+  "exports": {
+    ".": "./src/index.ts",
+    "./identity": "./src/identity.ts",
+    "./rules": "./src/rules.ts",
+    "./services-editor": "./src/ServicesEditor.tsx"
+  },
+  "dependencies": {
+    "@genclover/db": "*",
+    "@genclover/ids": "*",
+    "server-only": "^0.0.1"
+  },
+  "peerDependencies": {
+    "react": "19.1.0"
+  }
+}

@@ -11,10 +11,13 @@ import { Score, StageBadge, WebsiteState } from "../../bits";
 import { deepenSearch, resumeSearch, stopSearch } from "../../actions";
 import { grid } from "../../../lib/geo";
 import { SearchStatus } from "../SearchStatus";
+import GenerateGate from "../../../lib/GenerateGate";
+import { canGenerateLeads } from "../../../lib/scope";
 
 export default async function SearchDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
+  if (!(await canGenerateLeads(user))) return <GenerateGate title="Search" />;
   const search = await prisma.leadSearch.findUnique({ where: { id } });
   if (!search) notFound();
   const service = isService(search.service) ? SERVICE[search.service] : null;

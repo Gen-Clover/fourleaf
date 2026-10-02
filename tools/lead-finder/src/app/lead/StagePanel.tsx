@@ -32,6 +32,8 @@ export type StagePanelProps = {
   nextFollowUpAt: string | null;
   doNotContact: boolean;
   ownerId: string | null;
+  ownerName?: string | null;
+  /** People this user may move the lead to; empty = they can't move it (owner shown as text). */
   users: { id: string; name: string }[];
   canEdit: boolean;
   /** The open deal that winning marks won ("GO-2026-0001 · Web app"), or null when the Won form records a new one. */
@@ -117,10 +119,15 @@ export default function StagePanel(p: StagePanelProps) {
         <div className="grid gap-3 border-t border-neutral-200 pt-3">
           <label className="text-sm">
             <span className="label">Owner</span>
-            <select className="input" value={p.ownerId ?? ""} disabled={pending} onChange={(e) => run(() => assignOwner([p.id], e.target.value || null))}>
-              <option value="">Unassigned</option>
-              {p.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
+            {p.users.length ? (
+              <select className="input" value={p.ownerId ?? ""} disabled={pending} onChange={(e) => e.target.value && run(() => assignOwner([p.id], e.target.value))}>
+                {!p.ownerId && <option value="">In the pool (nobody)</option>}
+                {p.ownerId && !p.users.some((u) => u.id === p.ownerId) && <option value={p.ownerId}>{p.ownerName ?? "Current owner"}</option>}
+                {p.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            ) : (
+              <div className="input bg-neutral-50">{p.ownerName ?? "In the pool"}</div>
+            )}
           </label>
           {!closed && p.stage !== "SNOOZED" && (
             <label className="text-sm">

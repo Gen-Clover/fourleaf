@@ -12,7 +12,8 @@ import { audit } from "@genclover/db/audit";
 import { type Result, fail } from "@genclover/ui/result";
 import { requestApproval } from "../../lib/approvals";
 import { utcDay } from "../../lib/finance";
-import { draftLines, netOf } from "../../lib/payroll";
+import * as incentives from "@genclover/incentives";
+import { draftLines, incentiveDraft, netOf } from "../../lib/payroll";
 
 const touch = (id?: string) => {
   revalidatePath("/finance/payruns");
@@ -21,9 +22,13 @@ const touch = (id?: string) => {
 };
 
 async function writeLines(payRunId: string, month: string) {
-  const lines = await draftLines(month);
+  // Sales incentives this run claimed before go back first, then whatever is ready now is claimed again.
+  await incentives.releasePayRun(payRunId);
+  const [pay, inc] = await Promise.all([draftLines(month), incentiveDraft(month)]);
+  const lines = [...pay, ...inc.lines];
   await prisma.payLine.deleteMany({ where: { payRunId } });
   if (lines.length) await prisma.payLine.createMany({ data: lines.map((l) => ({ ...l, payRunId })) });
+  await incentives.attachToPayRun(payRunId, inc.entryIds);
   await totals(payRunId);
   return lines.length;
 }
@@ -92,6 +97,7 @@ export async function removeLine(lineId: string): Promise<Result> {
     const l = await prisma.payLine.findUniqueOrThrow({ where: { id: lineId }, include: { payRun: true } });
     if (l.payRun.status !== "DRAFT") throw new Error("Only drafts can be changed");
     await prisma.payLine.delete({ where: { id: lineId } });
+    if (l.kind === "INCENTIVE") await incentives.releasePersonFromPayRun(l.payRunId, l.personId);
     await totals(l.payRunId);
     touch(l.payRunId);
     return { ok: true, message: "Removed." };
@@ -127,6 +133,7 @@ export async function markPayRunPaid(id: string, input: { date: string; referenc
     await prisma.expense.updateMany({ where: { id: { in: expenseIds } }, data: { paidOn: date, reference: input.reference || run.code } });
     await prisma.payLine.updateMany({ where: { payRunId: id }, data: { paidOn: date, reference: input.reference || null } });
     await prisma.payRun.update({ where: { id }, data: { status: "PAID", paidAt: date } });
+    await incentives.payRunPaid(id, date);
     await audit(user, "UPDATE", "PayRun", id, `${run.code}: paid ${input.date}${input.reference ? ` (${input.reference})` : ""}`);
     touch(id);
     revalidatePath("/expenses");
@@ -142,6 +149,7 @@ export async function deletePayRun(id: string) {
   const run = await prisma.payRun.findUniqueOrThrow({ where: { id } });
   if (run.status !== "DRAFT") throw new Error("Only drafts can be deleted");
   await prisma.approval.deleteMany({ where: { type: "PAY_RUN", entityId: id } });
+  await incentives.releasePayRun(id);
   await prisma.payRun.delete({ where: { id } });
   await audit(user, "DELETE", "PayRun", id, `${run.code} deleted (draft)`);
   touch();
