@@ -19,7 +19,9 @@ export default function NewSearchForm({ niches, markets, services, keyConfigured
   const [dayOfWeek, setDayOfWeek] = useState(1);
   const [hour, setHour] = useState(7);
   const [areas, setAreas] = useState("");
-  const [radiusKm, setRadiusKm] = useState(0);
+  // Kept as typed (a number box that snaps back to 0 shows "020" when you type 20); empty means 0.
+  const [radiusText, setRadiusText] = useState("");
+  const radiusKm = Math.min(50, Math.max(0, Math.round(Number(radiusText) || 0)));
   const [depth, setDepth] = useState<"QUICK" | "THOROUGH">("THOROUGH");
   const [estimate, setEstimate] = useState<(Estimate & { for: string }) | null>(null);
   const [error, setError] = useState("");
@@ -126,7 +128,7 @@ export default function NewSearchForm({ niches, markets, services, keyConfigured
           </div>
           <div>
             <label className="label" htmlFor="radius">and around (km)</label>
-            <input id="radius" className="input" type="number" min={0} max={50} value={radiusKm} onChange={(e) => setRadiusKm(Math.max(0, Number(e.target.value) || 0))} />
+            <input id="radius" className="input" type="number" inputMode="numeric" min={0} max={50} placeholder="0" value={radiusText} onChange={(e) => setRadiusText(e.target.value.replace(/^0+(?=\d)/, ""))} />
           </div>
         </section>
 

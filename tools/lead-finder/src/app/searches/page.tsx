@@ -23,12 +23,12 @@ export default async function SearchesPage() {
       <PageHeader
         title="Searches"
         subtitle="Every Google Maps search, newest first."
-        actions={can(user.role, "leads.edit") && <Link href="/leads/find" className="btn-primary">+ New search</Link>}
+        actions={<Link href="/leads/find" className="btn-primary">+ New search</Link>}
       />
       <Schedules schedules={schedules} canEdit={can(user.role, "leads.edit")} />
       <div className="card overflow-x-auto">
         {searches.length === 0 ? (
-          <Empty href={can(user.role, "leads.edit") ? "/leads/find" : undefined} cta="Run your first search">No searches yet.</Empty>
+          <Empty href="/leads/find" cta="Run your first search">No searches yet.</Empty>
         ) : (
           <table className="tbl">
             <thead>

@@ -38,6 +38,7 @@ const money = (usd: number) => (usd <= 0 ? "free (within the monthly allowance)"
 export default function LeadTable({
   leads,
   users,
+  canMove = false,
   canEdit,
   showService,
   hot,
@@ -47,6 +48,8 @@ export default function LeadTable({
 }: {
   leads: Row[];
   users: { id: string; name: string }[];
+  /** Owners and managers allowed to move leads: show the Move control (with a hint when nobody is on the team yet). */
+  canMove?: boolean;
   canEdit: boolean;
   showService: boolean;
   hot: number;
@@ -118,9 +121,9 @@ export default function LeadTable({
                 <option value="">Not a fit…</option>
                 {NOT_FIT_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
-              {users.length > 0 && (
-                <select className="input-sm w-auto" value="" disabled={pending} onChange={(e) => e.target.value && assign(e.target.value)} aria-label="Move to">
-                  <option value="">Move to…</option>
+              {canMove && (
+                <select className="input-sm w-auto" value="" disabled={pending || !users.length} onChange={(e) => e.target.value && assign(e.target.value)} aria-label="Move to" title={users.length ? undefined : "Nobody to move leads to yet: add people on Incentives → Sales team"}>
+                  <option value="">{users.length ? "Move to…" : "Move to: add people on Sales team first"}</option>
                   {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
               )}

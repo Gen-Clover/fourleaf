@@ -112,7 +112,7 @@ export default async function LeadFinderHome() {
           canEdit && (
             <>
               <Link href="/leads/new" className="btn-secondary">+ Add a lead</Link>
-              <Link href="/leads/find" className="btn-secondary">+ New search</Link>
+              {gen && <Link href="/leads/find" className="btn-secondary">+ New search</Link>}
               <Link href="/leads/today" className="btn-primary">Open today&apos;s queue →</Link>
             </>
           )

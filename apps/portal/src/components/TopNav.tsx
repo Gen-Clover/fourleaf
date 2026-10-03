@@ -33,7 +33,8 @@ const Gear = () => (
  * The shared top bar: the app switcher (every tool), the tool's grouped menus with tabs for the current group
  * underneath, page search (Ctrl+K), settings and the user menu. Only the page scrolls, never the navigation.
  */
-export default function TopNav({ role, name, tool }: { role: string; name: string; tool: ToolNav }) {
+/** hide: pages this person can't use although their role can (per-person permissions, e.g. a manager not allowed to search). */
+export default function TopNav({ role, name, tool, hide = [] }: { role: string; name: string; tool: ToolNav; hide?: string[] }) {
   const path = usePathname();
   const [open, setOpen] = useState<string | null>(null);
   const [mobile, setMobile] = useState(false);
@@ -70,7 +71,7 @@ export default function TopNav({ role, name, tool }: { role: string; name: strin
   const isActive = (href: string) => ([tool.home, "/admin"].includes(href) ? path === href : path === href || path.startsWith(`${href}/`));
   const sections = tool.sections
     // Only the pages this role can open (packages/auth/src/access.ts).
-    .map((s) => ({ ...s, items: s.items.filter((i) => canAccessPath(role, i.href)) }))
+    .map((s) => ({ ...s, items: s.items.filter((i) => canAccessPath(role, i.href) && !hide.includes(i.href)) }))
     .filter((s) => s.items.length > 0);
   const settings = [...(tool.admin ?? []), ...CORE_ADMIN].filter((i) => canAccessPath(role, i.href));
   const groups = [...sections.filter((s) => s.title), ...(settings.length ? [{ title: "Settings", items: settings }] : [])];
@@ -79,7 +80,8 @@ export default function TopNav({ role, name, tool }: { role: string; name: strin
   const start = [tool.home, ...sections.flatMap((s) => s.items.map((i) => i.href))].find((h) => canAccessPath(role, h)) ?? "/";
   const initials = name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const tools = useMemo(() => toolsFor(role), [role]);
-  const pages = useMemo(() => pagesFor(role), [role]);
+  const hidden = hide.join("|");
+  const pages = useMemo(() => pagesFor(role).filter((p) => !hidden.split("|").includes(p.href)), [role, hidden]);
   const inTool = (home: string) => home !== "/" && (path === home || tool.home === home);
 
   const topClass = (active: boolean) =>

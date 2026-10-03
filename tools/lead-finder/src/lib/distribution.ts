@@ -6,8 +6,8 @@
 //               When a band doesn't divide evenly, the extra leads go to whoever has had the fewest extras in that
 //               band (then the fewest open leads, then the longest wait), so whoever got one less this time gets one
 //               more next time.
-//   Moving      Owners move any lead to anyone in the sales team (won leads too). A manager the owner allows moves
-//               their own team's leads between their team (never won leads). Everyone else can't move leads.
+//   Moving      Owners move any lead to anyone on the sales team (won leads too). A manager the owner allows moves
+//               any lead that isn't won to anyone on the team but themselves. Everyone else can't move leads.
 //   Inactivity  The worker rotates leads their owner hasn't worked for N days (stages the owner ticks), after a
 //               warning; they go to someone else in the rotation, never back to the same person.
 // No Next.js or server-only imports: the worker runs rotateInactive.
@@ -179,12 +179,11 @@ export async function checkMove(user: Viewer, leadIds: string[], toUserId: strin
   const me = members.find((m) => m.userId === user.id);
   if (!can(user.role, "leads.team") || !me?.canReassignTeam) throw new Error("Moving leads needs the owner's permission (Lead Finder → Sales team)");
   if (!to) throw new Error("Pick who gets them");
-  const team = [user.id, ...members.filter((m) => m.managerUserId === user.id).map((m) => m.userId)];
-  if (to.id === user.id) throw new Error("Managers move leads between their team, not to themselves: ask an owner");
-  if (!team.includes(to.id)) throw new Error(`${to.name} isn't in your team`);
-  const leads = await prisma.lead.findMany({ where: { id: { in: leadIds } }, select: { ownerId: true, stage: true } });
-  if (leads.some((l) => l.stage === "WON")) throw new Error("Won leads are moved by an owner only");
-  if (leads.some((l) => !l.ownerId || !team.includes(l.ownerId))) throw new Error("You can move your own team's leads only");
+  // A manager allowed to move leads sees every lead and moves any of them to anyone on the sales team, except to
+  // themselves and except won leads (stage rules beyond Won are still to be decided).
+  if (to.id === user.id) throw new Error("Managers don't move leads to themselves: ask an owner");
+  const won = await prisma.lead.count({ where: { id: { in: leadIds }, stage: "WON" } });
+  if (won) throw new Error(`${won} of these lead(s) are won: only an owner moves won leads`);
   return { to, via: "TEAM" as AssignVia };
 }
 

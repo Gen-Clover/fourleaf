@@ -15,7 +15,7 @@ import { getLfSettings, getLfTexts } from "../../lib/settings";
 import { endOfTodayIst as endOfToday, startOfTodayIst as startOfToday } from "../../lib/time";
 import { Score, StageBadge } from "../bits";
 import MarketToggle from "../MarketToggle";
-import { seesAllLeads } from "../../lib/scope";
+import { canGenerateLeads, seesAllLeads } from "../../lib/scope";
 import TodayCard from "./TodayCard";
 
 type Kind = "REPLY" | "FOLLOW_UP" | "NEW";
@@ -35,6 +35,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   const texts = await getLfTexts();
   // Today is each person's own queue: the leads they own (owners and the CFO, who see every lead, get everyone's).
   const mine = seesAllLeads(user) ? {} : { ownerId: user.id };
+  const gen = await canGenerateLeads(user);
   const scope = { ...mine, doNotContact: false, branchOfId: null, ...(market ? { market } : {}) };
   // Automatic email follow-ups (Settings) are sent by the worker, so they don't need a person here.
   const autoEmail = s.autoEmailFollowUps > 0 && emailConfigured();
@@ -187,8 +188,14 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
       )}
       {!current ? (
         <div className="card p-10 text-center text-sm text-neutral-500">
-          All done for today. <Link className="text-brand-fg underline" href="/leads/list?stage=NEW">Qualify more leads</Link> or{" "}
-          <Link className="text-brand-fg underline" href="/leads/find">run a search</Link>.
+          All done for today. <Link className="text-brand-fg underline" href="/leads/list?stage=NEW">Qualify more leads</Link>
+          {gen ? (
+            <>
+              {" "}or <Link className="text-brand-fg underline" href="/leads/find">run a search</Link>.
+            </>
+          ) : (
+            <> or <Link className="text-brand-fg underline" href="/leads/new">add a lead you found</Link>.</>
+          )}
         </div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">

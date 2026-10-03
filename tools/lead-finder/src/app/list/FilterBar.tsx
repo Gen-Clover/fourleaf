@@ -35,7 +35,7 @@ export default function FilterBar({
   niches: { key: string; label: string }[];
   users: { id: string; name: string }[];
   meId: string;
-  /** Owners and the CFO: offer "Unassigned (pool)". */
+  /** Whoever sees every lead (owners, the CFO, managers allowed to generate or move): offer "Unassigned". */
   showPool?: boolean;
 }) {
   const router = useRouter();
@@ -80,7 +80,7 @@ export default function FilterBar({
         {select("niche", "Niche", [["", "All niches"], ...niches.map((n) => [n.key, n.label] as [string, string])])}
         {select("followUp", "Follow-up", [["", "Any"], ["DUE", "Due now"]])}
         {/* Sellers see only their own leads, so there is nothing to filter by owner; only owners see the pool. */}
-        {users.length > 0 && select("owner", "Owner", [["", "Anyone"], ...(showPool ? [["none", "Unassigned (pool)"] as [string, string]] : []), ...users.map((u) => [u.id, u.id === meId ? `${u.name} (me)` : u.name] as [string, string])])}
+        {users.length > 0 && select("owner", "Assigned to", [["", "Anyone"], ...(showPool ? [["none", "Unassigned (new, not handed out)"] as [string, string]] : []), ...users.map((u) => [u.id, u.id === meId ? `${u.name} (me)` : u.name] as [string, string])])}
         {select("claude", "Claude review", [["", "Any"], ["HIGH", "High fit"], ["MEDIUM", "Medium fit"], ["LOW", "Low fit"], ["NONE", "Not reviewed"]])}
         {select("sort", "Sort", [["score", "Best score"], ["followup", "Next follow-up (scheduled)"], ["google", "Google data (oldest first)"], ["newest", "Newest"], ["name", "Name"]])}
       </div>
