@@ -74,6 +74,20 @@ export async function saveMember(m: { userId: string; managerUserId: string | nu
   return prisma.salesMember.upsert({ where: { userId: m.userId }, update: data, create: { userId: m.userId, ...data } });
 }
 
+/**
+ * Take someone off the sales team. The people they managed are left without a manager (returned, so the page can
+ * say who). Deals already won keep their seller and manager, and their incentives are untouched.
+ */
+export async function removeMember(userId: string) {
+  const managed = await prisma.salesMember.findMany({ where: { managerUserId: userId }, select: { userName: true } });
+  await prisma.$transaction([
+    prisma.salesMember.updateMany({ where: { managerUserId: userId }, data: { managerUserId: null, managerName: null } }),
+    prisma.leadRotation.deleteMany({ where: { userId } }),
+    prisma.salesMember.deleteMany({ where: { userId } }),
+  ]);
+  return managed.map((m) => m.userName);
+}
+
 /** The users someone may see the incentives of: themselves, plus the people they manage. */
 export async function visibleUserIds(userId: string) {
   const team = await prisma.salesMember.findMany({ where: { managerUserId: userId }, select: { userId: true } });

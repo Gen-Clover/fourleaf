@@ -117,6 +117,27 @@ export async function saveTeamMember(input: z.input<typeof Member>): Promise<Res
   }
 }
 
+/**
+ * Take someone off the sales team. Refused while they still own open leads (move those first on Distribute, so no
+ * lead is left with an owner who isn't on the team). Won deals and incentives stay as they are.
+ */
+export async function removeTeamMember(userId: string): Promise<Result> {
+  try {
+    const user = await assertPermission("incentives.manage");
+    const m = await prisma.salesMember.findUnique({ where: { userId } });
+    if (!m) return { ok: true, message: "Not on the sales team." };
+    const open = await prisma.lead.count({ where: { ownerId: userId, stage: { notIn: ["WON", "LOST", "NOT_A_FIT"] } } });
+    if (open) throw new Error(`${m.userName} still owns ${open} open lead(s). Move them first (Pipeline → Distribute → Assigned, Owner = ${m.userName}), then remove.`);
+    const orphaned = await inc.removeMember(userId);
+    await audit(user, "DELETE", "SalesMember", m.id, `${m.userName} removed from the sales team${orphaned.length ? `; no manager now: ${orphaned.join(", ")}` : ""}`);
+    revalidatePath("/leads/incentives/team");
+    revalidatePath("/leads/distribute");
+    return { ok: true, message: `${m.userName} removed.${orphaned.length ? ` ${orphaned.join(", ")} now ha${orphaned.length > 1 ? "ve" : "s"} no manager: pick a new one.` : ""}` };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 export async function saveIncentiveSettings(input: { sellerPct: number; managerPct: number; holdDays: number }): Promise<Result> {
   try {
     const user = await assertPermission("incentives.manage");
