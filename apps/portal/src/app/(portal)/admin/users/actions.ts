@@ -35,9 +35,11 @@ export async function createUser(_: ActionResult | undefined, fd: FormData): Pro
   }
 }
 
-export async function updateUser(id: string, patch: { role?: string; active?: boolean; name?: string }): Promise<ActionResult> {
+export async function updateUser(id: string, input: { role?: string; active?: boolean }): Promise<ActionResult> {
   try {
     const user = await assertPermission("users.manage");
+    // Role and status only (names and emails go through editUser).
+    const patch = z.object({ role: z.enum(ROLES).optional(), active: z.boolean().optional() }).parse(input);
     // Nobody changes their own role (so an Admin can't make themselves Owner), and only owners touch owner accounts.
     if (id === user.id && ((patch.role && patch.role !== user.role) || patch.active === false)) {
       throw new Error("You cannot change your own role or deactivate your own account");
@@ -55,6 +57,47 @@ export async function updateUser(id: string, patch: { role?: string; active?: bo
     return { ok: true, message: "User updated." };
   } catch (e) {
     return fail(e);
+  }
+}
+
+const Profile = z.object({
+  name: z.string().trim().min(1, "Name is required").max(120),
+  email: z.email("Valid email required").transform((s) => s.trim().toLowerCase()),
+});
+
+/**
+ * Change someone's name or login email. Same rules as roles: only owners edit owner accounts. The name shown on
+ * things they currently own (leads, deals, calls, the sales team, open incentives) follows; history keeps the
+ * name it was written with.
+ */
+export async function editUser(id: string, input: { name: string; email: string }): Promise<ActionResult> {
+  try {
+    const user = await assertPermission("users.manage");
+    const d = Profile.parse(input);
+    const target = await prisma.user.findUniqueOrThrow({ where: { id } });
+    if (target.role === "OWNER" && !can(user.role, "admin")) throw new Error("Only an owner can edit an owner account");
+    if (d.email !== target.email && (await prisma.user.findUnique({ where: { email: d.email } }))) throw new Error("Another user already has this email");
+    const renamed = d.name !== target.name;
+    await prisma.$transaction([
+      prisma.user.update({ where: { id }, data: { name: d.name, email: d.email } }),
+      ...(renamed
+        ? [
+            prisma.lead.updateMany({ where: { ownerId: id }, data: { ownerName: d.name } }),
+            prisma.opportunity.updateMany({ where: { ownerId: id }, data: { ownerName: d.name } }),
+            prisma.leadTask.updateMany({ where: { assigneeId: id }, data: { assigneeName: d.name } }),
+            prisma.salesMember.updateMany({ where: { userId: id }, data: { userName: d.name } }),
+            prisma.salesMember.updateMany({ where: { managerUserId: id }, data: { managerName: d.name } }),
+            prisma.salesIncentive.updateMany({ where: { sellerUserId: id, status: { notIn: ["CANCELLED", "NOT_ELIGIBLE"] } }, data: { sellerName: d.name } }),
+            prisma.salesIncentive.updateMany({ where: { managerUserId: id, status: { notIn: ["CANCELLED", "NOT_ELIGIBLE"] } }, data: { managerName: d.name } }),
+          ]
+        : []),
+    ]);
+    const changes = [renamed && `name ${target.name} → ${d.name}`, d.email !== target.email && `email ${target.email} → ${d.email}`].filter(Boolean).join(", ");
+    if (changes) await audit(user, "UPDATE", "User", id, `${target.email}: ${changes}`);
+    revalidatePath("/admin/users");
+    return { ok: true, message: changes ? `Saved: ${changes}.${id === user.id ? " Sign out and in again to see your new name in the menu." : ""}` : "Nothing changed." };
+  } catch (e) {
+    return fail(e instanceof z.ZodError ? new Error(e.issues[0].message) : e);
   }
 }
 
