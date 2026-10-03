@@ -9,7 +9,7 @@ import { bulkAction } from "../actions";
 import { Score, StageBadge, WebsiteState } from "../bits";
 import { download } from "../ClaudePanel";
 import { claudeBrief, estimateRefresh, refreshMatching } from "../moreActions";
-import { assignOwner } from "../stageActions";
+import MovePreview from "../MovePreview";
 
 type Row = {
   id: string;
@@ -78,15 +78,9 @@ export default function LeadTable({
         router.refresh();
       }
     });
-  const assign = (userId: string) =>
-    start(async () => {
-      const r = await assignOwner([...selected], userId === "none" ? null : userId);
-      setMsg(r?.message ?? "");
-      if (r?.ok) {
-        setSelected(new Set());
-        router.refresh();
-      }
-    });
+  // A move opens the check first (lib/distribution.ts stage rules); undefined = closed, null = back to the pool.
+  const [moving, setMoving] = useState<string | null | undefined>(undefined);
+  const assign = (userId: string) => setMoving(userId === "none" ? null : userId);
   /** Refresh Google data for the selection, or for every lead matching the filters; asks first with the cost. */
   const refresh = (scope: "selected" | "matching") =>
     start(async () => {
@@ -111,6 +105,19 @@ export default function LeadTable({
 
   return (
     <div className="card">
+      {moving !== undefined && (
+        <MovePreview
+          scope={{ ids: [...selected] }}
+          to={moving}
+          onClose={() => setMoving(undefined)}
+          onDone={(r) => {
+            setMoving(undefined);
+            setMsg(r.message);
+            setSelected(new Set());
+            router.refresh();
+          }}
+        />
+      )}
       {canEdit && (
         <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 px-3 py-2 text-sm">
           <span className="text-neutral-500">{selected.size ? `${selected.size} selected` : "Select leads to act on several at once"}</span>

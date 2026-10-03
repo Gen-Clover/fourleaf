@@ -247,18 +247,19 @@ export async function setFollowUp(id: string, on: string | null): Promise<Result
 }
 
 /**
- * Move leads to a person (null = back to the pool). Owners: anyone's leads, won ones too. A manager the owner allows:
- * their team's leads (not won) within their team. Nobody else (lib/distribution.ts checkMove).
+ * Move leads to a person (null = back to the pool), by the stage rules in lib/distribution.ts (who may move: checkMove;
+ * which leads: classify). The screens preview first (distributeActions.previewMove) and then move with a reason.
  */
-export async function assignOwner(ids: string[], userId: string | null, note?: string): Promise<Result> {
+export async function assignOwner(ids: string[], userId: string | null, o: { note?: string; reason?: string; force?: boolean } = {}): Promise<Result> {
   try {
     const { user } = await editor();
     const leadIds = z.array(z.string()).min(1, "Select some leads").max(500).parse(ids);
-    const n = await moveLeads(user, leadIds, userId, note?.trim() || undefined);
+    const r = await moveLeads(user, leadIds, userId, { note: o.note?.trim() || undefined, reason: o.reason?.trim() || undefined, force: !!o.force });
     revalidatePath("/leads/list");
     revalidatePath("/leads/distribute");
     for (const id of leadIds.slice(0, 1)) revalidatePath(`/leads/${id}`);
-    return { ok: true, message: `${n} lead(s) ${userId ? "moved" : "back in the pool"}.` };
+    const skipped = r.skipped.length ? ` ${r.skipped.length} skipped (${r.skipped.map((i) => i.note).filter(Boolean)[0] ?? "blocked"}).` : "";
+    return { ok: r.moved > 0, message: `${r.moved} lead(s) ${userId ? "moved" : "back in the pool"}.${skipped}` };
   } catch (e) {
     return { ok: false, message: errMsg(e) };
   }

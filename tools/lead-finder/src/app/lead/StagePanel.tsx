@@ -4,8 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ADD_ONS, CARE_PLANS, LOST_REASONS, NOT_FIT_REASONS, PACKAGES, REPLY_CATEGORIES, STAGE_LABEL, WIN_REASONS } from "../../lib/services";
 import { setDoNotContact } from "../actions";
+import MovePreview from "../MovePreview";
 import {
-  assignOwner,
   markLost,
   markNotFit,
   markProposalSent,
@@ -49,6 +49,8 @@ export default function StagePanel(p: StagePanelProps) {
   const [open, setOpen] = useState<Panel>(null);
   const [msg, setMsg] = useState<Result>(undefined);
   const [pending, start] = useTransition();
+  // Changing the owner opens the move check (stage rules, reason when needed) before anything moves.
+  const [moving, setMoving] = useState<string | undefined>(undefined);
   const run = (fn: () => Promise<Result>) =>
     start(async () => {
       const r = await fn();
@@ -120,7 +122,7 @@ export default function StagePanel(p: StagePanelProps) {
           <label className="text-sm">
             <span className="label">Owner</span>
             {p.users.length ? (
-              <select className="input" value={p.ownerId ?? ""} disabled={pending} onChange={(e) => e.target.value && run(() => assignOwner([p.id], e.target.value))}>
+              <select className="input" value={p.ownerId ?? ""} disabled={pending} onChange={(e) => e.target.value && e.target.value !== p.ownerId && setMoving(e.target.value)}>
                 {!p.ownerId && <option value="">In the pool (nobody)</option>}
                 {p.ownerId && !p.users.some((u) => u.id === p.ownerId) && <option value={p.ownerId}>{p.ownerName ?? "Current owner"}</option>}
                 {p.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -152,6 +154,18 @@ export default function StagePanel(p: StagePanelProps) {
         </div>
       )}
       {msg && <p className={`text-sm ${msg.ok ? "text-emerald-700" : "text-red-600"}`}>{msg.message}</p>}
+      {moving && (
+        <MovePreview
+          scope={{ ids: [p.id] }}
+          to={moving}
+          onClose={() => setMoving(undefined)}
+          onDone={(r) => {
+            setMoving(undefined);
+            setMsg(r);
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

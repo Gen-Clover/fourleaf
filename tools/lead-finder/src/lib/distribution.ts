@@ -168,7 +168,7 @@ export async function distribute(leadIds: string[], people: { id: string; name: 
  * Check a move and return the receiver. Owners: any lead to anyone in the sales team. A manager the owner allows:
  * their team's leads, not won, to someone in their team. Nobody else.
  */
-export async function checkMove(user: Viewer, leadIds: string[], toUserId: string | null) {
+export async function checkMove(user: Viewer, toUserId: string | null) {
   const members = await prisma.salesMember.findMany();
   const owner = can(user.role, "leads.manage");
   const to = toUserId ? await prisma.user.findUnique({ where: { id: toUserId }, select: { id: true, name: true, active: true, role: true } }) : null;
@@ -179,21 +179,162 @@ export async function checkMove(user: Viewer, leadIds: string[], toUserId: strin
   const me = members.find((m) => m.userId === user.id);
   if (!can(user.role, "leads.team") || !me?.canReassignTeam) throw new Error("Moving leads needs the owner's permission (Lead Finder → Sales team)");
   if (!to) throw new Error("Pick who gets them");
-  // A manager allowed to move leads sees every lead and moves any of them to anyone on the sales team, except to
-  // themselves and except won leads (stage rules beyond Won are still to be decided).
+  // A manager allowed to move leads moves them to anyone on the sales team except themselves; which leads may move
+  // depends on their stage (classify, below).
   if (to.id === user.id) throw new Error("Managers don't move leads to themselves: ask an owner");
-  const won = await prisma.lead.count({ where: { id: { in: leadIds }, stage: "WON" } });
-  if (won) throw new Error(`${won} of these lead(s) are won: only an owner moves won leads`);
   return { to, via: "TEAM" as AssignVia };
 }
 
-export async function moveLeads(user: Viewer, leadIds: string[], toUserId: string | null, note?: string) {
-  const { to, via } = await checkMove(user, leadIds, toUserId);
-  const won = await prisma.lead.count({ where: { id: { in: leadIds }, stage: "WON" } });
-  const n = await assignLeads(leadIds, to, { by: user, via: won && via === "MANUAL" ? "WON_FIX" : via, note });
+// ---------- Stage rules for moving a lead ----------
+//
+// The more a lead has been worked, the more its owner is protected:
+//   FREE          New, Qualified, Lost, Not a fit (nobody is mid-conversation)
+//   WARN          Contacted (messages sent, no reply), Snoozed: moves, with what the mover should know
+//   REASON        Replied, or any lead past Contacted its owner worked in the last 7 days: moves with a reason
+//   OWNER_REASON  Call / meeting, Proposal sent: owners only, with a reason
+//   FORCE         Won: owners only, ticking "force" and giving a reason (the incentive is not moved)
+//   BLOCKED       Do not contact (nobody should own it), or a rule above the mover's role
+//   SAME          already theirs
+// A move or a hand-out only ever moves what these rules allow; the rest is skipped and reported.
+
+export type MoveClass = "FREE" | "WARN" | "REASON" | "OWNER_REASON" | "FORCE" | "BLOCKED" | "SAME";
+export const MOVE_CLASS_LABEL: Record<MoveClass, string> = {
+  FREE: "Will move",
+  WARN: "Will move (read the note)",
+  REASON: "Needs a reason",
+  OWNER_REASON: "Owner only, with a reason",
+  FORCE: "Won: an owner can force it, with a reason",
+  BLOCKED: "Can't be moved",
+  SAME: "Already theirs",
+};
+const RECENT_DAYS = 7;
+const PAST_CONTACTED = ["REPLIED", "MEETING", "PROPOSAL", "SNOOZED"];
+const ymd = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : "");
+
+type PlanLead = {
+  id: string;
+  code: string;
+  name: string;
+  stage: string;
+  ownerId: string | null;
+  ownerName: string | null;
+  doNotContact: boolean;
+  contactCount: number;
+  lastContactAt: Date | null;
+  snoozeUntil: Date | null;
+  assignedAt: Date | null;
+  createdAt: Date;
+  lastReplyAt: Date | null;
+};
+
+/** Which rule applies to one lead, for this mover. */
+export function classify(l: PlanLead, o: { owner: boolean; toUserId: string | null; workedRecently: boolean; workedOn: Date | null }): { cls: MoveClass; note: string } {
+  if (l.doNotContact) return { cls: "BLOCKED", note: "Do not contact: nobody should own it" };
+  if (o.toUserId !== null && l.ownerId === o.toUserId) return { cls: "SAME", note: "Already theirs" };
+  if (l.stage === "WON") {
+    return o.owner
+      ? { cls: "FORCE", note: `Won by ${l.ownerName ?? "nobody"}: the incentive stays with the seller unless corrected on the incentive` }
+      : { cls: "BLOCKED", note: "Won: only an owner can move it" };
+  }
+  if (l.stage === "MEETING" || l.stage === "PROPOSAL") {
+    const what = l.stage === "MEETING" ? "In a call / meeting" : "Proposal sent";
+    return o.owner ? { cls: "OWNER_REASON", note: `${what} with ${l.ownerName ?? "its owner"}` } : { cls: "BLOCKED", note: `${what}: only an owner can move it` };
+  }
+  if (l.stage === "REPLIED") return { cls: "REASON", note: `They replied to ${l.ownerName ?? "its owner"}${l.lastReplyAt ? ` on ${ymd(l.lastReplyAt)}` : ""}: a live conversation` };
+  if (l.ownerId && PAST_CONTACTED.includes(l.stage) && o.workedRecently) return { cls: "REASON", note: `${l.ownerName ?? "Its owner"} worked it on ${ymd(o.workedOn)}` };
+  if (l.stage === "CONTACTED") {
+    return { cls: "WARN", note: `${l.ownerName ?? "Someone"} sent ${l.contactCount} message(s)${l.lastContactAt ? `, last on ${ymd(l.lastContactAt)}` : ""}: the follow-ups continue with the new owner` };
+  }
+  if (l.stage === "SNOOZED") return { cls: "WARN", note: `Snoozed until ${ymd(l.snoozeUntil)}: the date stays` };
+  return { cls: "FREE", note: "" };
+}
+
+export type MovePlanItem = { id: string; code: string; name: string; stage: string; ownerId: string | null; owner: string | null; cls: MoveClass; note: string };
+
+/** The rule for each lead. "Worked recently" means its owner did something on it (not just got it) in the last 7 days. */
+async function classifyLeads(leadIds: string[], owner: boolean, toUserId: string | null): Promise<MovePlanItem[]> {
+  const leads: PlanLead[] = await prisma.lead.findMany({
+    where: { id: { in: leadIds } },
+    select: { id: true, code: true, name: true, stage: true, ownerId: true, ownerName: true, doNotContact: true, contactCount: true, lastContactAt: true, snoozeUntil: true, assignedAt: true, createdAt: true, lastReplyAt: true },
+  });
+  const worked = await lastWorked(leads.filter((l) => l.ownerId && PAST_CONTACTED.includes(l.stage)));
+  const since = Date.now() - RECENT_DAYS * DAY;
+  return leads.map((l) => {
+    const w = worked.get(l.id) ?? null;
+    const touched = !!w && w.getTime() > (l.assignedAt ?? l.createdAt).getTime() && w.getTime() >= since;
+    const { cls, note } = classify(l, { owner, toUserId, workedRecently: touched, workedOn: w });
+    return { id: l.id, code: l.code, name: l.name, stage: l.stage, ownerId: l.ownerId, owner: l.ownerName, cls, note };
+  });
+}
+
+/** What a move would do, lead by lead, before anything changes (the preview). Checks who may move too. */
+export async function planMove(user: Viewer, leadIds: string[], toUserId: string | null) {
+  const { to, via } = await checkMove(user, toUserId);
+  const owner = can(user.role, "leads.manage");
+  const items = await classifyLeads(leadIds, owner, toUserId);
+  const counts = Object.fromEntries((Object.keys(MOVE_CLASS_LABEL) as MoveClass[]).map((c) => [c, items.filter((i) => i.cls === c).length])) as Record<MoveClass, number>;
+  return { to, via, owner, items, counts };
+}
+
+const canGo = (c: MoveClass, reason: string, force: boolean) =>
+  c === "FREE" || c === "WARN" || ((c === "REASON" || c === "OWNER_REASON") && !!reason) || (c === "FORCE" && force && !!reason);
+
+/**
+ * Move leads by the stage rules. What needs a reason moves only with one; won leads only when an owner forces it;
+ * blocked ones never. Open calls and meetings follow the lead; both people are emailed about protected moves.
+ */
+export async function moveLeads(user: Viewer, leadIds: string[], toUserId: string | null, o: { reason?: string; force?: boolean; note?: string } = {}) {
+  const plan = await planMove(user, leadIds, toUserId);
+  const reason = o.reason?.trim() ?? "";
+  const go = plan.items.filter((i) => canGo(i.cls, reason, !!o.force));
+  const skipped = plan.items.filter((i) => !canGo(i.cls, reason, !!o.force) && i.cls !== "SAME");
+  if (!go.length) return { moved: 0, skipped, plan };
+  const protectedMoves = go.filter((i) => i.cls === "REASON" || i.cls === "OWNER_REASON" || i.cls === "FORCE");
+  const text = [o.note?.trim(), reason && `reason: ${reason}`].filter(Boolean).join("; ") || undefined;
+  const viaOf = (i: MovePlanItem): AssignVia => (i.cls === "FORCE" ? "WON_FIX" : plan.via);
+  for (const via of [...new Set(go.map(viaOf))]) await assignLeads(go.filter((i) => viaOf(i) === via).map((i) => i.id), plan.to, { by: user, via, note: text });
+  // Open calls and meetings on these leads now belong to the new owner (back to the pool: they stay where they are).
+  if (plan.to) await prisma.leadTask.updateMany({ where: { leadId: { in: go.map((i) => i.id) }, status: "OPEN" }, data: { assigneeId: plan.to.id, assigneeName: plan.to.name } });
+  if (protectedMoves.length) await notifyMove(user, protectedMoves, plan.to, reason);
   // Written directly (not via @genclover/db/audit, which is server-only): this file also runs in the worker.
-  await prisma.auditLog.create({ data: { userId: user.id, userName: user.name, action: "UPDATE", entity: "Lead", entityId: null, summary: `${n} lead(s) moved to ${to?.name ?? "the pool"}${won ? ` (${won} won)` : ""}${note ? `: ${note}` : ""}` } });
-  return n;
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userName: user.name,
+      action: "UPDATE",
+      entity: "Lead",
+      entityId: null,
+      summary: `${go.length} lead(s) moved to ${plan.to?.name ?? "the pool"}${protectedMoves.length ? ` (${protectedMoves.length} protected)` : ""}${skipped.length ? `; ${skipped.length} skipped` : ""}${text ? `: ${text}` : ""}`,
+    },
+  });
+  return { moved: go.length, skipped, plan };
+}
+
+/** Email the people losing and gaining protected leads (Replied and later), when email is set up. Never blocks a move. */
+async function notifyMove(by: Viewer, items: MovePlanItem[], to: { id: string; name: string } | null, reason: string) {
+  try {
+    const { emailConfigured, sendSystemEmail } = await import("./email");
+    if (!emailConfigured()) return;
+    const line = (i: MovePlanItem) => `· ${i.code} ${i.name} (${stageLabel(i.stage)})`;
+    const ids = [...new Set([...items.map((i) => i.ownerId), to?.id].filter((x): x is string => !!x))];
+    const people = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, email: true } });
+    for (const p of people) {
+      const gaining = !!to && p.id === to.id;
+      const mine = gaining ? items : items.filter((i) => i.ownerId === p.id);
+      const subject = gaining ? `${mine.length} lead(s) moved to you` : `${mine.length} lead(s) moved from you to ${to?.name ?? "the pool"}`;
+      const body = `${by.name} moved these leads ${gaining ? "to you" : `from you to ${to?.name ?? "the pool"}`}.\nReason: ${reason}\n\n${mine.map(line).join("\n")}`;
+      await sendSystemEmail(p.email, subject, body).catch(() => false);
+    }
+  } catch {
+    // A courtesy: a failure here never undoes or blocks the move.
+  }
+}
+
+/** The leads a hand-out by rotation may take from their current owner (FREE and WARN only; protected ones stay). */
+export async function rotatableForHandOut(user: Viewer, leadIds: string[]) {
+  const items = await classifyLeads(leadIds, can(user.role, "leads.manage"), null);
+  const ids = items.filter((i) => i.cls === "FREE" || i.cls === "WARN").map((i) => i.id);
+  return { ids, kept: items.length - ids.length };
 }
 
 // ---------- Inactivity ----------

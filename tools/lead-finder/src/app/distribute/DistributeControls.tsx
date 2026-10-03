@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { distributeByRotation, moveTo, saveRotation } from "../distributeActions";
+import { distributeByRotation, saveRotation } from "../distributeActions";
+import MovePreview from "../MovePreview";
 
 type Msg = { ok: boolean; message: string } | null;
 const Note = ({ msg }: { msg: Msg }) => (msg ? <span className={`text-sm ${msg.ok ? "text-emerald-700" : "text-red-600"}`}>{msg.message}</span> : null);
@@ -54,6 +55,8 @@ export function DistributeTable({
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
+  // A move opens the check first (who moves, who needs a reason, who can't); undefined = closed, null = the pool.
+  const [moving, setMoving] = useState<string | null | undefined>(undefined);
   const all = selected.size === 0;
   const scope = all ? { query } : { ids: [...selected] };
   const count = all ? total : selected.size;
@@ -87,7 +90,7 @@ export function DistributeTable({
             className="btn-primary btn-sm"
             disabled={pending || !count}
             title={`Split by score band between ${people.length} people`}
-            onClick={() => run(() => distributeByRotation(scope), `Hand out ${count} lead(s) by rotation between ${people.length} people?${!poolView && owner ? " Leads that already have an owner go to someone else." : ""}`)}
+            onClick={() => run(() => distributeByRotation(scope), `Hand out ${count} lead(s) by rotation between ${people.length} people?${!poolView && owner ? " Owned leads nobody is working go to someone else; ones being worked stay." : ""}`)}
           >
             Hand out by rotation
           </button>
@@ -99,19 +102,33 @@ export function DistributeTable({
               {targets.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             <input className="input-sm w-48" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-            <button type="button" className="btn-secondary btn-sm" disabled={pending || !to || !count} onClick={() => run(() => moveTo({ ...scope, to, note }), `Move ${count} lead(s) to ${toName}?`)}>
+            <button type="button" className="btn-secondary btn-sm" disabled={pending || !to || !count} title={toName ? `Check and move ${count} lead(s) to ${toName}` : undefined} onClick={() => setMoving(to)}>
               Move
             </button>
           </>
         )}
         {owner && !poolView && (
-          <button type="button" className="btn-secondary btn-sm" disabled={pending || !count} onClick={() => run(() => moveTo({ ...scope, to: null, note }), `Put ${count} lead(s) back in the pool?`)}>
+          <button type="button" className="btn-secondary btn-sm" disabled={pending || !count} onClick={() => setMoving(null)}>
             Back to pool
           </button>
         )}
         {selected.size > 0 && <button type="button" className="text-xs text-neutral-500 hover:underline" onClick={() => setSelected(new Set())}>Clear selection</button>}
         <Note msg={msg} />
       </div>
+      {moving !== undefined && (
+        <MovePreview
+          scope={scope}
+          to={moving}
+          note={note}
+          onClose={() => setMoving(undefined)}
+          onDone={(r) => {
+            setMoving(undefined);
+            setMsg(r);
+            setSelected(new Set());
+            router.refresh();
+          }}
+        />
+      )}
       {canPool && (
         <div className="border-b border-neutral-100 px-4 py-2 text-xs text-neutral-500">
           In the rotation: {people.length ? people.map((p) => `${p.name} (${p.open} open)`).join(" · ") : "nobody: mark people active on the Sales team page"}
