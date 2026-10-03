@@ -3,17 +3,17 @@ import { Empty, PageHeader } from "@genclover/ui";
 import { requireUser } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { date } from "@genclover/ui/format";
-import { BANDS, bandLabel, distLeads, holdingReport, parseDistFilters, ROTATABLE_STAGES, rotationPeople, rotationSettings, stageLabel } from "../../lib/distribution";
+import { BANDS, bandLabel, distLeads, holdingReport, idleSettings, parseDistFilters, ROTATABLE_STAGES, rotationPeople, stageLabel } from "../../lib/distribution";
 import { distAccessFor, moveTargets } from "../../lib/scope";
 import { SOURCES } from "../../lib/services";
-import { DistributeTable, RotationSettingsForm } from "./DistributeControls";
+import { DistributeTable, IdleAlertForm } from "./DistributeControls";
 
 const SHOWN = 300;
 
 /**
  * Distribute: the pool of leads nobody owns yet (from searches and imports), handed out fairly by rotation, and the
  * owner's view of who holds what and what is sitting idle, with bulk moves. Managers see their team (and the pool if
- * the owner allows them to hand it out).
+ * the owner allows them to hand it out). Idle leads never move by themselves: this page flags them for a bulk clean-up.
  */
 export default async function DistributePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
@@ -30,13 +30,16 @@ export default async function DistributePage({ searchParams }: { searchParams: P
   const f = parseDistFilters({ view: a.canPool ? "pool" : "assigned", ...sp });
   if (f.view === "pool" && !a.canPool) f.view = "assigned";
   const [s, leads, people, targets, owners] = await Promise.all([
-    rotationSettings(),
+    idleSettings(),
     distLeads(f, { canPool: a.canPool, team: a.team }),
     rotationPeople(),
     moveTargets(user),
     a.owner ? prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }) : prisma.user.findMany({ where: { id: { in: a.team ?? [] } }, select: { id: true, name: true } }),
   ]);
-  const report = await holdingReport(s.idleDays, a.team);
+  const report = await holdingReport(s, a.team);
+  const idleTotal = report.reduce((n, r) => n + r.idleLimit, 0);
+  // The list behind the alert: assigned leads past the limit, in the stages that count.
+  const idleList = (owner: string) => `/leads/distribute?${new URLSearchParams([["view", "assigned"], ["idle", String(s.idleDays)], ...(owner ? [["owner", owner]] : []), ...s.stages.map((st) => ["stage", st])])}`;
   // The filters as a query string (checkbox groups repeat a key), for links and the "all matching" actions.
   const query = new URLSearchParams(Object.entries(sp).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
   const link = (patch: Record<string, string>) => {
@@ -54,9 +57,19 @@ export default async function DistributePage({ searchParams }: { searchParams: P
     <>
       <PageHeader
         title="Distribute leads"
-        subtitle="Hand out the pool fairly (by score band, evened out over runs), see whose leads are sitting idle, and move them."
+        subtitle="Hand out the pool fairly (by score band, evened out over runs), see whose leads are sitting idle, and clean them up in bulk."
         actions={<Link href="/leads/incentives/team" className="btn-secondary">Sales team →</Link>}
       />
+
+      {idleTotal > 0 && (
+        <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>
+            <span className="font-semibold">{idleTotal} lead(s) idle {s.idleDays}+ days</span>
+            {" "}({report.filter((r) => r.idleLimit).map((r) => `${r.name} ${r.idleLimit}`).join(", ")}): nobody has worked them. Nothing moves by itself.
+          </span>
+          <Link href={idleList("")} className="btn-secondary btn-sm ml-auto">Review idle leads →</Link>
+        </div>
+      )}
 
       <section className="card mb-6 overflow-x-auto">
         <div className="card-h">
@@ -74,7 +87,7 @@ export default async function DistributePage({ searchParams }: { searchParams: P
                 <td className={`num ${r.idleLimit ? "font-medium text-red-600" : ""}`}>{r.idleLimit}</td>
                 <td className="num">{r.oldestIdle ? `${r.oldestIdle} d` : "—"}</td>
                 <td className="num">{r.won90}</td>
-                <td className="text-right"><Link className="text-xs text-brand-fg hover:underline" href={link({ view: "assigned", owner: r.id, idle: "7" })}>Idle leads →</Link></td>
+                <td className="text-right"><Link className="text-xs text-brand-fg hover:underline" href={r.idleLimit ? idleList(r.id) : link({ view: "assigned", owner: r.id, idle: "7" })}>Idle leads →</Link></td>
               </tr>
             ))}
             {report.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-neutral-500">Nobody in the rotation yet: mark people active on the Sales team page.</td></tr>}
@@ -150,6 +163,7 @@ export default async function DistributePage({ searchParams }: { searchParams: P
         poolView={f.view === "pool"}
         people={people.map((p) => ({ id: p.id, name: p.name, open: p.open }))}
         targets={targets}
+        idleDays={s.idleDays}
         leads={leads.slice(0, SHOWN).map((l) => ({
           id: l.id,
           code: l.code,
@@ -161,7 +175,6 @@ export default async function DistributePage({ searchParams }: { searchParams: P
           band: bandLabel(l.band),
           owner: l.ownerName,
           idleDays: l.idleDays,
-          warned: !!l.rotationWarnedAt,
           addedBy: l.createdByName,
           source: SOURCES[l.source] ?? l.source,
           assigned: l.assignedAt ? date(l.assignedAt) : null,
@@ -169,7 +182,7 @@ export default async function DistributePage({ searchParams }: { searchParams: P
         shown={Math.min(SHOWN, leads.length)}
       />
 
-      {a.owner && <RotationSettingsForm initial={s} stages={ROTATABLE_STAGES.map((st) => ({ key: st, label: stageLabel(st) }))} />}
+      {a.owner && <IdleAlertForm initial={s} stages={ROTATABLE_STAGES.map((st) => ({ key: st, label: stageLabel(st) }))} />}
     </>
   );
 }

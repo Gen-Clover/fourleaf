@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { distributeByRotation, saveRotation } from "../distributeActions";
+import { distributeByRotation, saveIdleAlert } from "../distributeActions";
 import MovePreview from "../MovePreview";
 
 type Msg = { ok: boolean; message: string } | null;
@@ -20,7 +20,6 @@ type Row = {
   band: string;
   owner: string | null;
   idleDays: number | null;
-  warned: boolean;
   addedBy: string | null;
   source: string;
   assigned: string | null;
@@ -37,6 +36,7 @@ export function DistributeTable({
   poolView,
   people,
   targets,
+  idleDays,
 }: {
   leads: Row[];
   total: number;
@@ -48,6 +48,7 @@ export function DistributeTable({
   poolView: boolean;
   people: { id: string; name: string; open: number }[];
   targets: { id: string; name: string }[];
+  idleDays: number;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -157,7 +158,7 @@ export function DistributeTable({
                 <td className={`text-sm ${l.won ? "font-medium text-emerald-700" : ""}`}>{l.stage}</td>
                 <td className="num">{l.score || "—"}<div className="text-[11px] text-neutral-500">{l.band}</div></td>
                 <td className="text-sm">{l.owner ?? <span className="text-neutral-500">pool</span>}{l.assigned && <div className="text-xs text-neutral-500">since {l.assigned}</div>}</td>
-                <td className={`num ${l.idleDays != null && l.idleDays >= 30 ? "text-red-600" : ""}`}>{l.idleDays != null ? `${l.idleDays} d` : "—"}{l.warned && <div className="text-[11px] text-amber-700">warned</div>}</td>
+                <td className={`num ${l.idleDays != null && l.idleDays >= idleDays ? "font-medium text-red-600" : ""}`}>{l.idleDays != null ? `${l.idleDays} d` : "—"}</td>
                 <td className="hidden text-xs md:table-cell">{l.addedBy ? `Added by ${l.addedBy}` : l.source}</td>
               </tr>
             ))}
@@ -168,24 +169,23 @@ export function DistributeTable({
   );
 }
 
-/** The inactivity rotation: on/off, after how many days, the warning, and which stages it applies to. */
-export function RotationSettingsForm({ initial, stages }: { initial: { enabled: boolean; idleDays: number; warnDays: number; stages: string[] }; stages: { key: string; label: string }[] }) {
+/** When a lead counts as idle: the alert at the top of this page and the "Idle N+ days" column. Nothing moves by itself. */
+export function IdleAlertForm({ initial, stages }: { initial: { idleDays: number; stages: string[] }; stages: { key: string; label: string }[] }) {
+  const router = useRouter();
   const [f, setF] = useState(initial);
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
   return (
     <section className="card p-5">
-      <div className="mb-1 font-medium text-ink">Rotate leads nobody works</div>
+      <div className="mb-1 font-medium text-ink">Idle leads alert</div>
       <p className="mb-3 text-sm text-neutral-500">
-        Once a day the worker warns the owner, then moves leads with no activity (messages, calls, meetings, notes, replies) to someone else in the rotation, never back to the same person. Won, lost and not-a-fit leads never move.
+        Flags leads whose owner hasn&apos;t worked them (messages, calls, meetings, notes, replies) for this long. Nothing moves by itself: review the idle list above and move them in bulk.
       </p>
       <div className="flex flex-wrap items-end gap-4 text-sm">
-        <label className="flex items-center gap-2"><input type="checkbox" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} /> On</label>
-        <label className="block"><span className="label">After (days idle)</span><input className="input w-24" type="number" min={3} max={365} value={f.idleDays} onChange={(e) => setF({ ...f, idleDays: Number(e.target.value) })} /></label>
-        <label className="block"><span className="label">Warn this many days before</span><input className="input w-24" type="number" min={0} max={60} value={f.warnDays} onChange={(e) => setF({ ...f, warnDays: Number(e.target.value) })} /></label>
+        <label className="block"><span className="label">Idle after (days)</span><input className="input w-24" type="number" min={3} max={365} value={f.idleDays} onChange={(e) => setF({ ...f, idleDays: Number(e.target.value) })} /></label>
       </div>
       <fieldset className="mt-3 text-sm">
-        <legend className="label">Stages that rotate</legend>
+        <legend className="label">Stages that count</legend>
         <div className="flex flex-wrap gap-3">
           {stages.map((s) => (
             <label key={s.key} className="flex items-center gap-1.5">
@@ -195,7 +195,14 @@ export function RotationSettingsForm({ initial, stages }: { initial: { enabled: 
         </div>
       </fieldset>
       <div className="mt-3 flex items-center gap-2">
-        <button type="button" className="btn-primary btn-sm" disabled={pending} onClick={() => start(async () => setMsg((await saveRotation(f)) ?? null))}>Save</button>
+        <button
+          type="button"
+          className="btn-primary btn-sm"
+          disabled={pending}
+          onClick={() => start(async () => { const r = (await saveIdleAlert(f)) ?? null; setMsg(r); if (r?.ok) router.refresh(); })}
+        >
+          Save
+        </button>
         <Note msg={msg} />
       </div>
     </section>

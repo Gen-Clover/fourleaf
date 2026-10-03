@@ -8,9 +8,9 @@
 //               more next time.
 //   Moving      Owners move any lead to anyone on the sales team (won leads too). A manager the owner allows moves
 //               any lead that isn't won to anyone on the team but themselves. Everyone else can't move leads.
-//   Inactivity  The worker rotates leads their owner hasn't worked for N days (stages the owner ticks), after a
-//               warning; they go to someone else in the rotation, never back to the same person.
-// No Next.js or server-only imports: the worker runs rotateInactive.
+//   Idle leads  Nothing moves by itself. The Distribute page flags leads their owner hasn't worked for N days (the
+//               stages the owner ticks) and lists them, to move in bulk by hand.
+// No Next.js or server-only imports: kept usable outside the website (scripts, the worker).
 import { can } from "@genclover/auth/access";
 import { prisma } from "@genclover/db";
 import { CLOSED_STAGES, OPEN_STAGES, STAGE_LABEL } from "./services";
@@ -35,36 +35,34 @@ export const bandLabel = (key: string) => BANDS.find((b) => b.key === key)?.labe
 
 // ---------- Settings ----------
 
-const ROTATION_KEYS = { rotationEnabled: 1, rotationIdleDays: 30, rotationWarnDays: 7 };
-/** Stages the inactivity rotation applies to by default: early stages. Meetings and proposals are left alone. */
-export const DEFAULT_ROTATION_STAGES = ["NEW", "QUALIFIED", "CONTACTED", "REPLIED"];
+// Stored under the keys the old automatic rotation used, so a value saved before carries over.
+const IDLE_DAYS_KEY = "rotationIdleDays";
+const IDLE_STAGES_KEY = "rotationStages";
+/** Stages counted as idle by default: early stages. Meetings and proposals are usually waiting on the client. */
+export const DEFAULT_IDLE_STAGES = ["NEW", "QUALIFIED", "CONTACTED", "REPLIED"];
 export const ROTATABLE_STAGES: string[] = [...OPEN_STAGES, "SNOOZED"].filter((s) => !CLOSED_STAGES.includes(s));
 
-export async function rotationSettings() {
-  const rows = await prisma.setting.findMany({ where: { key: { in: [...Object.keys(ROTATION_KEYS), "rotationStages"] } } });
-  const v = (k: keyof typeof ROTATION_KEYS) => {
-    const r = rows.find((x) => x.key === k);
-    return r && Number.isFinite(Number(r.value)) ? Number(r.value) : ROTATION_KEYS[k];
-  };
-  let stages = DEFAULT_ROTATION_STAGES;
+/** When a lead counts as idle on the Distribute page: no work by its owner for idleDays, in one of these stages. */
+export async function idleSettings() {
+  const rows = await prisma.setting.findMany({ where: { key: { in: [IDLE_DAYS_KEY, IDLE_STAGES_KEY] } } });
+  const days = Number(rows.find((x) => x.key === IDLE_DAYS_KEY)?.value);
+  let stages = DEFAULT_IDLE_STAGES;
   try {
-    const raw = rows.find((x) => x.key === "rotationStages")?.value;
+    const raw = rows.find((x) => x.key === IDLE_STAGES_KEY)?.value;
     if (raw) stages = (JSON.parse(raw) as string[]).filter((s) => ROTATABLE_STAGES.includes(s));
   } catch {
     // keep the default
   }
-  return { enabled: v("rotationEnabled") === 1, idleDays: v("rotationIdleDays"), warnDays: v("rotationWarnDays"), stages };
+  return { idleDays: Number.isFinite(days) && days > 0 ? days : 30, stages };
 }
 
-export async function saveRotationSettings(s: { enabled: boolean; idleDays: number; warnDays: number; stages: string[] }) {
+export async function saveIdleSettings(s: { idleDays: number; stages: string[] }) {
   const rows: [string, string, string, string, string][] = [
-    ["rotationEnabled", s.enabled ? "1" : "0", "Rotate inactive leads", "", "1 = on"],
-    ["rotationIdleDays", String(s.idleDays), "Rotate after no activity for", "days", ""],
-    ["rotationWarnDays", String(s.warnDays), "Warn the owner this many days before", "days", ""],
-    ["rotationStages", JSON.stringify(s.stages.filter((x) => ROTATABLE_STAGES.includes(x))), "Stages that rotate", "", "JSON list of stages"],
+    [IDLE_DAYS_KEY, String(s.idleDays), "Flag a lead as idle after no activity for", "days", "Distribute page alert"],
+    [IDLE_STAGES_KEY, JSON.stringify(s.stages.filter((x) => ROTATABLE_STAGES.includes(x))), "Stages counted as idle", "", "JSON list of stages"],
   ];
   for (const [key, value, label, unit, description] of rows) {
-    await prisma.setting.upsert({ where: { key }, update: { value }, create: { key, value, label, unit, description, group: "Lead rotation", type: key === "rotationStages" ? "text" : "number" } });
+    await prisma.setting.upsert({ where: { key }, update: { value, label, description }, create: { key, value, label, unit, description, group: "Idle leads", type: key === IDLE_STAGES_KEY ? "text" : "number" } });
   }
 }
 
@@ -366,38 +364,6 @@ export async function lastWorked(leads: { id: string; ownerId: string | null; as
   return m;
 }
 
-/**
- * The worker's daily pass: warn owners of leads that will rotate soon, and rotate the ones past the limit to
- * someone else in the rotation. Only the stages ticked in the settings; won, lost and not-a-fit never move.
- */
-export async function rotateInactive(now = new Date()) {
-  const s = await rotationSettings();
-  if (!s.enabled || !s.stages.length) return { warned: 0, rotated: 0 };
-  const candidates = await prisma.lead.findMany({
-    where: { ownerId: { not: null }, stage: { in: s.stages }, doNotContact: false },
-    select: { id: true, name: true, ownerId: true, ownerName: true, assignedAt: true, createdAt: true, lastReplyAt: true, rotationWarnedAt: true },
-  });
-  const worked = await lastWorked(candidates);
-  const system: By = { id: null, name: "Lead rotation" };
-  const idle = (id: string) => (now.getTime() - worked.get(id)!.getTime()) / DAY;
-  const toRotate = candidates.filter((l) => idle(l.id) >= s.idleDays);
-  const toWarn = candidates.filter((l) => idle(l.id) >= s.idleDays - s.warnDays && idle(l.id) < s.idleDays && (!l.rotationWarnedAt || l.rotationWarnedAt < worked.get(l.id)!));
-  for (const l of toWarn) {
-    const on = new Date(worked.get(l.id)!.getTime() + s.idleDays * DAY);
-    await prisma.lead.update({ where: { id: l.id }, data: { rotationWarnedAt: now } });
-    await prisma.leadActivity.create({ data: { leadId: l.id, type: "SYSTEM", text: `No activity for ${Math.floor(idle(l.id))} days: moves to someone else on ${on.toISOString().slice(0, 10)} unless ${l.ownerName ?? "the owner"} works it`, byId: null, byName: system.name } });
-  }
-  let rotated = 0;
-  if (toRotate.length) {
-    const people = await rotationPeople();
-    if (people.length > 1) {
-      const res = await distribute(toRotate.map((l) => l.id), people, { by: system, via: "EXPIRY", exclude: new Map(toRotate.map((l) => [l.id, l.ownerId!])) });
-      rotated = res.reduce((n, r) => n + r.count, 0);
-    }
-  }
-  return { warned: toWarn.length, rotated };
-}
-
 export const stageLabel = (s: string) => STAGE_LABEL[s] ?? s;
 
 // ---------- The Distribute page's filters (also used by its "all matching" actions) ----------
@@ -475,25 +441,28 @@ export async function distLeads(f: DistFilters, opts: { canPool: boolean; team: 
 }
 
 /** Per person: what they hold, how much of it is sitting idle, and what they've won lately. */
-export async function holdingReport(idleDays: number, team: string[] | null) {
+export async function holdingReport(idle: { idleDays: number; stages: string[] }, team: string[] | null) {
   const people = await rotationPeople();
   const users = team ? people.filter((p) => team.includes(p.id)) : people;
   const open = await prisma.lead.findMany({
     where: { ownerId: { in: users.map((p) => p.id) }, stage: { in: ROTATABLE_STAGES }, doNotContact: false },
-    select: { id: true, ownerId: true, assignedAt: true, createdAt: true, lastReplyAt: true },
+    select: { id: true, ownerId: true, stage: true, assignedAt: true, createdAt: true, lastReplyAt: true },
   });
   const worked = await lastWorked(open);
+  const now = Date.now();
+  const days = (l: { id: string }) => Math.floor((now - worked.get(l.id)!.getTime()) / DAY);
   const since90 = new Date(Date.now() - 90 * DAY);
   const won = await prisma.lead.groupBy({ by: ["ownerId"], where: { ownerId: { in: users.map((p) => p.id) }, stage: "WON", wonAt: { not: null, gte: since90 } }, _count: { _all: true } });
-  const now = Date.now();
   return users.map((p) => {
-    const mine = open.filter((l) => l.ownerId === p.id).map((l) => Math.floor((now - worked.get(l.id)!.getTime()) / DAY));
+    const held = open.filter((l) => l.ownerId === p.id);
+    const mine = held.map(days);
     return {
       id: p.id,
       name: p.name,
       open: mine.length,
       idle7: mine.filter((d) => d >= 7).length,
-      idleLimit: mine.filter((d) => d >= idleDays).length,
+      // Past the idle limit, in the stages that count (the alert and the "Idle leads" link use the same rule).
+      idleLimit: held.filter((l) => idle.stages.includes(l.stage) && days(l) >= idle.idleDays).length,
       oldestIdle: mine.length ? Math.max(...mine) : 0,
       won90: won.find((w) => w.ownerId === p.id)?._count._all ?? 0,
     };

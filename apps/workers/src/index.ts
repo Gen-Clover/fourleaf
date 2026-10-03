@@ -7,7 +7,6 @@ import {
   leadFinderInbox,
   leadFinderJobs,
   leadFinderMaintenance,
-  leadFinderRotation,
   leadFinderScheduler,
   type JobHandler,
 } from "@genclover/lead-finder/jobs";
@@ -21,7 +20,6 @@ const MAINTENANCE: { name: string; everyMs: number; firstAfterMs: number; run: (
   { name: "lead-finder inbox", everyMs: 10 * 60_000, firstAfterMs: 20_000, run: leadFinderInbox },
   { name: "lead-finder auto email", everyMs: 15 * 60_000, firstAfterMs: 40_000, run: leadFinderAutoEmail },
   { name: "lead-finder maintenance", everyMs: 6 * 3_600_000, firstAfterMs: 30_000, run: leadFinderMaintenance },
-  { name: "lead-finder rotation", everyMs: 6 * 3_600_000, firstAfterMs: 90_000, run: leadFinderRotation },
   { name: "governance reminders", everyMs: 3 * 3_600_000, firstAfterMs: 60_000, run: governanceReminders },
 ];
 

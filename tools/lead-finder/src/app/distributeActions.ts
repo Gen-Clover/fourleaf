@@ -8,7 +8,7 @@ import { assertPermission } from "@genclover/auth";
 import { prisma } from "@genclover/db";
 import { audit } from "@genclover/db/audit";
 import { errMsg, type Result } from "@genclover/ui/result";
-import { distLeads, distribute, MOVE_CLASS_LABEL, type MoveClass, moveLeads, parseDistFilters, planMove, ROTATABLE_STAGES, rotatableForHandOut, rotationPeople, saveRotationSettings } from "../lib/distribution";
+import { distLeads, distribute, MOVE_CLASS_LABEL, type MoveClass, moveLeads, parseDistFilters, planMove, ROTATABLE_STAGES, rotatableForHandOut, rotationPeople, saveIdleSettings } from "../lib/distribution";
 import { distAccessFor } from "../lib/scope";
 
 type Viewer = { id: string; role: string; name: string };
@@ -99,17 +99,15 @@ export async function moveTo(input: z.input<typeof Target> & { to: string | null
   }
 }
 
-export async function saveRotation(input: { enabled: boolean; idleDays: number; warnDays: number; stages: string[] }): Promise<Result> {
+/** When a lead counts as idle on this page (nothing moves by itself; owners move idle leads by hand). */
+export async function saveIdleAlert(input: { idleDays: number; stages: string[] }): Promise<Result> {
   try {
     const user = await assertPermission("leads.manage");
-    const d = z
-      .object({ enabled: z.boolean(), idleDays: z.number().int().min(3).max(365), warnDays: z.number().int().min(0).max(60), stages: z.array(z.enum(ROTATABLE_STAGES as [string, ...string[]])) })
-      .parse(input);
-    if (d.warnDays >= d.idleDays) throw new Error("The warning must come before the rotation");
-    await saveRotationSettings(d);
-    await audit(user, "UPDATE", "Setting", null, `Lead rotation: ${d.enabled ? "on" : "off"}, ${d.idleDays} days idle (warning ${d.warnDays} days before), stages ${d.stages.join(", ") || "none"}`);
+    const d = z.object({ idleDays: z.number().int().min(3).max(365), stages: z.array(z.enum(ROTATABLE_STAGES as [string, ...string[]])).min(1, "Tick at least one stage") }).parse(input);
+    await saveIdleSettings(d);
+    await audit(user, "UPDATE", "Setting", null, `Idle leads: flagged after ${d.idleDays} days, stages ${d.stages.join(", ")}`);
     revalidatePath("/leads/distribute");
-    return { ok: true, message: "Saved. The worker checks once a day." };
+    return { ok: true, message: "Saved." };
   } catch (e) {
     return { ok: false, message: errMsg(e) };
   }

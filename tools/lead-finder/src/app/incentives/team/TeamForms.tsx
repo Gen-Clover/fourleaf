@@ -136,7 +136,7 @@ export function TeamTable({ rows, managers, people, others }: { rows: Row[]; man
         <span className="text-xs text-neutral-500">Sales, sales-manager and owner logins. Then set them up and press Save.</span>
       </div>
       <p className="px-5 pb-4 text-xs text-neutral-500">
-        In the lead rotation = gets leads handed out and rotated (inactive people get none). The two lead permissions are for sales managers; owners can always do both. Someone without a People record earns incentives but can&apos;t be paid until they have one (People → add, pay model &quot;Sales incentive only&quot; for incentive-only sellers). Salaried sellers get their incentives as a separate line in the same pay run.
+        In the lead rotation = gets leads when you hand out the pool on Distribute (people not ticked get none). The two lead permissions are for sales managers; owners can always do both. Someone without a People record earns incentives but can&apos;t be paid until they have one (People → add, pay model &quot;Sales incentive only&quot; for incentive-only sellers). Salaried sellers get their incentives as a separate line in the same pay run.
       </p>
     </section>
   );

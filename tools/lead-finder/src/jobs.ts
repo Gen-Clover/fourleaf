@@ -25,7 +25,6 @@ import { CLOSED_STAGES, isService, SERVICE, type ServiceKey } from "./lib/servic
 import { getLfSettings } from "./lib/settings";
 import { changeStage, retryLost, wakeSnoozed } from "./lib/stages";
 import { sendDueReminders } from "./lib/tasks";
-import { rotateInactive } from "./lib/distribution";
 
 export type JobResult = void | "PAUSED";
 export type JobHandler = (payload: Record<string, unknown>, job: { id: string; group: string | null }) => Promise<JobResult>;
@@ -161,10 +160,6 @@ export const leadFinderJobs: Record<string, JobHandler> = {
  * · Leads whose last follow-up got no reply for the set number of days are closed as Lost (No reply).
  */
 /** Leads their owner hasn't worked: warn, then rotate to someone else (Distribute → settings; lib/distribution.ts). */
-export async function leadFinderRotation() {
-  return rotateInactive();
-}
-
 export async function leadFinderMaintenance() {
   const cutoff = new Date(Date.now() - 30 * 86_400_000);
   const stale = { placeId: { not: null }, googleFetchedAt: { not: null, lt: cutoff } };
