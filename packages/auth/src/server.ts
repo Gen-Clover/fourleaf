@@ -46,7 +46,9 @@ export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>
  */
 export async function requireUser() {
   const user = await getCurrentUser();
-  if (!user) redirect("/login");
+  // A cookie for an account that no longer exists (or is disabled): clear it first, or /login (which trusts any
+  // valid cookie) and this page would redirect to each other forever.
+  if (!user) redirect((await cookies()).get(SESSION_COOKIE) ? "/logout" : "/login");
   const path = (await headers()).get(PATH_HEADER);
   if (path && !canAccessPath(user.role, path)) redirect("/?denied=1");
   return user;
