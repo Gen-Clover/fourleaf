@@ -193,7 +193,8 @@ export async function checkMove(user: Viewer, toUserId: string | null) {
 //   REASON        Replied, or any lead past Contacted its owner worked in the last 7 days: moves with a reason
 //   OWNER_REASON  Call / meeting, Proposal sent: owners only, with a reason
 //   FORCE         Won: owners only, ticking "force" and giving a reason (the incentive is not moved)
-//   BLOCKED       Do not contact (nobody should own it), or a rule above the mover's role
+//   BLOCKED       a rule above the mover's role (a manager and a won, meeting or proposal lead)
+// Do not contact: moves like WARN whatever its stage (except Won), and stays do-not-contact.
 //   SAME          already theirs
 // A move or a hand-out only ever moves what these rules allow; the rest is skipped and reported.
 
@@ -229,8 +230,10 @@ type PlanLead = {
 
 /** Which rule applies to one lead, for this mover. */
 export function classify(l: PlanLead, o: { owner: boolean; toUserId: string | null; workedRecently: boolean; workedOn: Date | null }): { cls: MoveClass; note: string } {
-  if (l.doNotContact) return { cls: "BLOCKED", note: "Do not contact: nobody should own it" };
   if (o.toUserId !== null && l.ownerId === o.toUserId) return { cls: "SAME", note: "Already theirs" };
+  // Nobody is talking to a do-not-contact lead, so the conversation rules below don't apply: it moves to anyone
+  // and stays do-not-contact. Won still follows the won rule (the incentive).
+  if (l.doNotContact && l.stage !== "WON") return { cls: "WARN", note: "Do not contact: stays on after the move" };
   if (l.stage === "WON") {
     return o.owner
       ? { cls: "FORCE", note: `Won by ${l.ownerName ?? "nobody"}: the incentive stays with the seller unless corrected on the incentive` }
