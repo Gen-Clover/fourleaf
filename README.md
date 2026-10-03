@@ -50,10 +50,14 @@ Sign in with `admin@genclover.local` / `ChangeMe@2026` (set `SEED_ADMIN_EMAIL` /
 |---|---|
 | `npm run db:local` | Start the local MongoDB (single-node replica set, data in `.mongo-data/`) |
 | `npm run db:push` | Apply schema changes (collections and indexes), then run `packages/db/scripts/after-push.ts` and `packages/ids/scripts/backfill.ts` (gives any record without a readable ID one) |
-| `npm run db:seed` | Seed defaults (safe to re-run: existing rows are kept) |
+| `npm run db:seed` | Seed defaults (safe to re-run: existing rows are kept). Never runs on deploy: run it by hand against a new database |
 | `npm run db:migrate-sqlite -- <path/to/dev.db>` | One-off copy of the old SQLite database into an **empty** MongoDB database. Keeps every id and checks row counts |
 | `npm run dev:portal` / `npm run worker` | Start only the portal (dev) / only the background worker |
 | `npm run typecheck` | Type-check the portal and every tool and package |
+
+### Deploys update their own database
+
+Every Vercel build (dev previews and production) runs `npm run db:push` against that environment's `DATABASE_URL` before `next build` (`apps/portal/scripts/deploy-db.mjs`). If it fails, the build fails and the previous version stays live: a change it can't apply safely, such as a new unique index on duplicate data, needs the data fixed first. Set `SKIP_DB_PUSH=1` in Vercel to skip it in an emergency. A local `npm run build` never touches a database.
 
 ### MongoDB notes
 

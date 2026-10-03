@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build",
+    "build": "node scripts/deploy-db.mjs && next build",
     "start": "next start",
     "lint": "eslint --config ../../eslint.config.mjs .",
     "typecheck": "tsc --noEmit"
