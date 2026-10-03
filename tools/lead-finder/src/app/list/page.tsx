@@ -7,7 +7,7 @@ import { baseWhere, listWhere, orderBy, parseFilters, scoreField } from "../../l
 import { MARKETS, MARKET_KEYS } from "../../lib/markets";
 import { SERVICES } from "../../lib/services";
 import { getLfSettings } from "../../lib/settings";
-import { canGenerateLeads, leadScope, moveTargets, ownerOptions } from "../../lib/scope";
+import { canGenerateLeads, leadScope, moveTargets, ownerOptions, seesAllLeads } from "../../lib/scope";
 import FilterBar from "./FilterBar";
 import LeadTable from "./LeadTable";
 import MarketToggle from "../MarketToggle";
@@ -84,6 +84,7 @@ export default async function LeadListPage({ searchParams }: { searchParams: Pro
         niches={niches}
         users={users}
         meId={user.id}
+        showPool={seesAllLeads(user)}
       />
 
       <LeadTable

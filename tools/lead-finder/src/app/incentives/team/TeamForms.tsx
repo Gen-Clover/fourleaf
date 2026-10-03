@@ -30,6 +30,8 @@ type Row = {
   userId: string;
   name: string;
   role: string;
+  /** False for roles that can't work leads (CFO, accountant…): they shouldn't be in the rotation. */
+  canWork?: boolean;
   saved: boolean;
   managerUserId: string | null;
   onIncentive: boolean;
@@ -48,7 +50,11 @@ function MemberRow({ row, managers, people }: { row: Row; managers: { id: string
   const dirty = !row.saved || JSON.stringify(f) !== JSON.stringify(row);
   return (
     <tr>
-      <td><div className="font-medium">{row.name}</div><div className="text-xs text-neutral-500">{row.role}{!row.saved && " · not set up yet"}</div></td>
+      <td>
+        <div className="font-medium">{row.name}</div>
+        <div className="text-xs text-neutral-500">{row.role}{!row.saved && " · not set up yet"}</div>
+        {row.canWork === false && <div className="text-xs text-red-600">This role can&apos;t work leads: untick &quot;In the lead rotation&quot;, or change their role</div>}
+      </td>
       <td>
         <select className="input" value={f.managerUserId ?? ""} onChange={(e) => setF({ ...f, managerUserId: e.target.value || null })}>
           <option value="">— no manager —</option>
@@ -86,14 +92,15 @@ export function TeamTable({ rows, managers, people, others }: { rows: Row[]; man
       <table className="tbl">
         <thead><tr><th>Person</th><th>Manager (gets the manager %)</th><th className="text-center">On incentives</th><th>Paid through (People)</th><th className="text-center">In the lead rotation</th><th className="text-center">Can generate leads</th><th className="text-center">Can move team leads</th><th /></tr></thead>
         <tbody>
-          {[...rows, ...extra].map((r) => <MemberRow key={r.userId} row={r} managers={managers} people={people} />)}
+          {/* Someone added below and then saved comes back from the server in rows: show them once. */}
+          {[...rows, ...extra.filter((x) => !rows.some((r) => r.userId === x.userId))].map((r) => <MemberRow key={r.userId} row={r} managers={managers} people={people} />)}
         </tbody>
       </table>
       {others.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-t border-neutral-100 px-5 py-3 text-sm">
           <select className="input max-w-xs" value={add} onChange={(e) => setAdd(e.target.value)}>
             <option value="">Add someone else who sells…</option>
-            {others.filter((o) => !extra.some((x) => x.userId === o.id)).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            {others.filter((o) => !extra.some((x) => x.userId === o.id) && !rows.some((r) => r.userId === o.id)).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
           <button type="button" className="btn-secondary btn-sm" disabled={!add} onClick={() => { const o = others.find((x) => x.id === add)!; setExtra([...extra, { userId: o.id, name: o.name, role: "", saved: false, managerUserId: null, onIncentive: true, personId: null, active: true, isManager: false, canGenerateLeads: false, canReassignTeam: false }]); setAdd(""); }}>Add</button>
         </div>

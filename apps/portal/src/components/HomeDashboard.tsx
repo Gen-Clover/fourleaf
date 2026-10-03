@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { can, canAccessPath, type CurrentUser } from "@genclover/auth";
+import { leadScope, opportunityScope } from "@genclover/lead-finder/lib/scope";
 import { prisma } from "@genclover/db";
 import { weekStart } from "@genclover/finance/lib/finance";
 import { receivables } from "@genclover/finance/lib/ledger";
@@ -23,10 +24,12 @@ async function homeData(user: CurrentUser) {
   const areas: Area[] = [];
 
   if (can(r, "leads.view")) {
+    // Counts follow the Lead Finder's visibility: a seller's own deals, a manager's team, everything for owners.
+    const [ls, os] = await Promise.all([leadScope(user), opportunityScope(user)]);
     const [openOpps, waiting, replied, values, p] = await Promise.all([
-      prisma.opportunity.count({ where: { stage: { in: OPEN_OPPS } } }),
-      prisma.opportunity.count({ where: { stage: "WON", onboardedAt: null } }),
-      prisma.lead.count({ where: { stage: "REPLIED" } }),
+      prisma.opportunity.count({ where: { ...os, stage: { in: OPEN_OPPS } } }),
+      prisma.opportunity.count({ where: { ...os, stage: "WON", onboardedAt: null } }),
+      prisma.lead.count({ where: { ...ls, stage: "REPLIED" } }),
       can(r, "deals.all") ? prisma.opportunity.findMany({ where: { stage: { in: OPEN_OPPS }, value: { not: null } }, select: { value: true, currency: true, probability: true } }) : [],
       getParams(),
     ]);

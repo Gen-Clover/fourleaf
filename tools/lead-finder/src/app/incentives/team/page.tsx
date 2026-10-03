@@ -1,6 +1,6 @@
 import { PageHeader } from "@genclover/ui";
 import { requirePermission } from "@genclover/auth";
-import { roleLabel } from "@genclover/auth/access";
+import { can, roleLabel } from "@genclover/auth/access";
 import { prisma } from "@genclover/db";
 import { getSettings, members } from "@genclover/incentives";
 import { SettingsForm, TeamTable } from "./TeamForms";
@@ -25,6 +25,7 @@ export default async function SalesTeamPage() {
       userId: u.id,
       name: u.name,
       role: roleLabel(u.role),
+      canWork: can(u.role, "leads.edit"),
       saved: !!m,
       managerUserId: m?.managerUserId ?? null,
       onIncentive: m?.onIncentive ?? true,
@@ -44,7 +45,8 @@ export default async function SalesTeamPage() {
         rows={rows}
         managers={users.map((u) => ({ id: u.id, name: u.name }))}
         people={people.map((p) => ({ id: p.id, label: `${p.code ?? ""} ${p.name}`.trim() }))}
-        others={users.filter((u) => !sales.some((x) => x.id === u.id)).map((u) => ({ id: u.id, name: `${u.name} (${roleLabel(u.role)})` }))}
+        // Only people whose role can work leads (e.g. an owner who also sells) can be added; a CFO or accountant can't.
+        others={users.filter((u) => !sales.some((x) => x.id === u.id) && can(u.role, "leads.edit")).map((u) => ({ id: u.id, name: `${u.name} (${roleLabel(u.role)})` }))}
       />
     </>
   );

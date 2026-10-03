@@ -73,7 +73,8 @@ export async function saveRotationSettings(s: { enabled: boolean; idleDays: numb
 /** Active sales managers and sellers (Sales team page), with their open lead counts. */
 export async function rotationPeople() {
   const members = await prisma.salesMember.findMany({ where: { active: true } });
-  const users = await prisma.user.findMany({ where: { id: { in: members.map((m) => m.userId) }, active: true }, select: { id: true, name: true } });
+  // Only people whose role can work leads: a CFO or accountant ticked by mistake gets nothing.
+  const users = (await prisma.user.findMany({ where: { id: { in: members.map((m) => m.userId) }, active: true }, select: { id: true, name: true, role: true } })).filter((u) => can(u.role, "leads.edit"));
   const open = await prisma.lead.groupBy({ by: ["ownerId"], where: { ownerId: { in: users.map((u) => u.id) }, stage: { in: [...OPEN_STAGES, "SNOOZED"] } }, _count: { _all: true } });
   return users.map((u) => ({ id: u.id, name: u.name, open: open.find((o) => o.ownerId === u.id)?._count._all ?? 0, managerUserId: members.find((m) => m.userId === u.id)?.managerUserId ?? null }));
 }
@@ -170,14 +171,16 @@ export async function distribute(leadIds: string[], people: { id: string; name: 
 export async function checkMove(user: Viewer, leadIds: string[], toUserId: string | null) {
   const members = await prisma.salesMember.findMany();
   const owner = can(user.role, "leads.manage");
-  const to = toUserId ? await prisma.user.findUnique({ where: { id: toUserId }, select: { id: true, name: true, active: true } }) : null;
+  const to = toUserId ? await prisma.user.findUnique({ where: { id: toUserId }, select: { id: true, name: true, active: true, role: true } }) : null;
   if (toUserId && (!to || !to.active)) throw new Error("Pick an active person");
+  if (to && !can(to.role, "leads.edit")) throw new Error(`${to.name}'s role can't work leads`);
   if (to && !members.some((m) => m.userId === to.id && m.active) && to.id !== user.id) throw new Error(`${to.name} isn't in the sales team (Lead Finder → Sales team)`);
   if (owner) return { to, via: "MANUAL" as AssignVia };
   const me = members.find((m) => m.userId === user.id);
   if (!can(user.role, "leads.team") || !me?.canReassignTeam) throw new Error("Moving leads needs the owner's permission (Lead Finder → Sales team)");
   if (!to) throw new Error("Pick who gets them");
   const team = [user.id, ...members.filter((m) => m.managerUserId === user.id).map((m) => m.userId)];
+  if (to.id === user.id) throw new Error("Managers move leads between their team, not to themselves: ask an owner");
   if (!team.includes(to.id)) throw new Error(`${to.name} isn't in your team`);
   const leads = await prisma.lead.findMany({ where: { id: { in: leadIds } }, select: { ownerId: true, stage: true } });
   if (leads.some((l) => l.stage === "WON")) throw new Error("Won leads are moved by an owner only");

@@ -62,11 +62,15 @@ export async function assertLeadAccess(u: Viewer, leadIds: string | string[]) {
  * own team; everyone else, nobody (the move control is hidden).
  */
 export async function moveTargets(u: Viewer): Promise<{ id: string; name: string }[]> {
-  const members = await prisma.salesMember.findMany({ where: { active: true }, select: { userId: true, userName: true, managerUserId: true } });
+  const all = await prisma.salesMember.findMany({ where: { active: true }, select: { userId: true, userName: true, managerUserId: true } });
+  // Only active people whose role can work leads.
+  const workers = new Set((await prisma.user.findMany({ where: { id: { in: all.map((m) => m.userId) }, active: true }, select: { id: true, role: true } })).filter((x) => can(x.role, "leads.edit")).map((x) => x.id));
+  const members = all.filter((m) => workers.has(m.userId));
   if (can(u.role, "leads.manage")) return members.map((m) => ({ id: m.userId, name: m.userName })).sort((a, b) => a.name.localeCompare(b.name));
   const me = await salesMember(u.id);
   if (!can(u.role, "leads.team") || !me?.canReassignTeam) return [];
-  return [{ id: u.id, name: me.userName }, ...members.filter((m) => m.managerUserId === u.id).map((m) => ({ id: m.userId, name: m.userName }))];
+  // A manager moves leads between the people in their team, not to themselves.
+  return members.filter((m) => m.managerUserId === u.id).map((m) => ({ id: m.userId, name: m.userName }));
 }
 
 /** The people whose leads this person can filter by (owner filter): everyone for owners, their team for managers. */

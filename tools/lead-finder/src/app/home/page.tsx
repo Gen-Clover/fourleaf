@@ -12,7 +12,7 @@ import { endOfTodayIst, startOfMonthIst } from "../../lib/time";
 import { Score, StageBadge } from "../bits";
 import { SearchStatus } from "../searches/SearchStatus";
 import WorkerStatus from "./WorkerStatus";
-import { leadRelationScope, leadScope } from "../../lib/scope";
+import { canGenerateLeads, leadRelationScope, leadScope } from "../../lib/scope";
 
 /** A dashboard tile that opens the Leads page with its filter applied. */
 const Tile = ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -30,6 +30,7 @@ export default async function LeadFinderHome() {
   const monthStart = startOfMonthIst();
   // Everyone's dashboard counts only the leads they may see: their own, their team's, or all for owners.
   const sc = await leadScope(user);
+  const gen = await canGenerateLeads(user);
   const open = { ...sc, stage: { in: [...OPEN_STAGES] }, doNotContact: false, branchOfId: null };
 
   // Tile counts use the same rules as the Leads page filters they link to (open = being worked, not
@@ -251,6 +252,8 @@ export default async function LeadFinderHome() {
 
         <section className="min-w-0 space-y-6">
           <WorkerStatus canEdit={canEdit} />
+          {/* Searches are for the owner and managers allowed to generate leads. */}
+          {gen && (
           <div className="card">
             <div className="card-h">
               <div className="card-t">Recent searches</div>
@@ -269,6 +272,7 @@ export default async function LeadFinderHome() {
               {searches.length === 0 && <li className="px-5 py-6 text-center text-sm text-neutral-500">No searches yet.</li>}
             </ul>
           </div>
+          )}
 
           {nicheRows.length > 0 && (
             <div className="card">

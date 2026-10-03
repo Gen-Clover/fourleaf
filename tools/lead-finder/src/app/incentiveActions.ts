@@ -5,6 +5,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { assertPermission, can } from "@genclover/auth";
+import { prisma } from "@genclover/db";
 import { audit } from "@genclover/db/audit";
 import * as inc from "@genclover/incentives";
 import type { ServiceLine } from "@genclover/incentives/rules";
@@ -103,6 +104,9 @@ export async function saveTeamMember(input: z.input<typeof Member>): Promise<Res
   try {
     const user = await assertPermission("incentives.manage");
     const m = Member.parse(input);
+    // The rotation hands leads only to people who can work them.
+    const who = await prisma.user.findUniqueOrThrow({ where: { id: m.userId }, select: { name: true, role: true } });
+    if (m.active && !can(who.role, "leads.edit")) throw new Error(`${who.name}'s role can't work leads: untick "In the lead rotation", or change their role first`);
     const saved = await inc.saveMember(m);
     await audit(user, "UPDATE", "SalesMember", saved.id, `${saved.userName}: manager ${saved.managerName ?? "none"}, ${saved.onIncentive ? "on incentives" : "not on incentives"}, ${saved.active ? "in the rotation" : "not in the rotation"}${saved.canGenerateLeads ? ", can generate leads" : ""}${saved.canReassignTeam ? ", can move team leads" : ""}${saved.personId ? "" : ", no People record"}`);
     revalidatePath("/leads/distribute");
