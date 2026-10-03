@@ -7,6 +7,7 @@ import { useFormAction } from "@genclover/ui/form-action";
 
 type U = { id: string; name: string; email: string; role: string; active: boolean; lastLoginAt: string | null };
 type R = { key: string; label: string; description: string };
+type SortKey = "name" | "email" | "status" | "lastLoginAt";
 
 export function NewUserForm({ roles }: { roles: R[] }) {
   const { state, pending, form } = useFormAction(createUser, { resetOnSuccess: true });
@@ -45,6 +46,27 @@ export function UsersTable({ users, meId, roles, isOwner }: { users: U[]; meId: 
       (!role || u.role === role) &&
       (!status || (status === "active" ? u.active : !u.active)),
   );
+  // Click a column header to sort by it; click again to reverse. Name A–Z by default.
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
+  const sorted = [...shown].sort((a, b) => {
+    const v = (u: U) => (sort.key === "status" ? (u.active ? 0 : 1) : sort.key === "lastLoginAt" ? (u.lastLoginAt ? Date.parse(u.lastLoginAt) : -Infinity) : u[sort.key].toLowerCase());
+    const [x, y] = [v(a), v(b)];
+    const c = x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name);
+    return sort.dir === "asc" ? c : -c;
+  });
+  const th = (key: SortKey, label: string) => (
+    <th aria-sort={sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 uppercase hover:text-ink"
+        onClick={() => setSort((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }))}
+        title={`Sort by ${label.toLowerCase()}`}
+      >
+        {label}
+        <span className={sort.key === key ? "text-ink" : "text-neutral-300"}>{sort.key === key && sort.dir === "desc" ? "↓" : "↑"}</span>
+      </button>
+    </th>
+  );
   const locked = (u: U) => !isOwner && u.role === "OWNER";
   const save = () =>
     editing &&
@@ -73,11 +95,11 @@ export function UsersTable({ users, meId, roles, isOwner }: { users: U[]; meId: 
       {msg && <div className={`px-5 py-2 text-sm ${msg.ok ? "text-emerald-700" : "text-red-600"}`}>{msg.message}</div>}
       <table className="tbl">
         <thead>
-          <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last login</th><th>Actions</th></tr>
+          <tr>{th("name", "Name")}{th("email", "Email")}<th>Role</th>{th("status", "Status")}{th("lastLoginAt", "Last login")}<th>Actions</th></tr>
         </thead>
         <tbody>
           {shown.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-neutral-500">No users match.</td></tr>}
-          {shown.map((u) => (
+          {sorted.map((u) => (
             <tr key={u.id}>
               {editing?.id === u.id ? (
                 <>
