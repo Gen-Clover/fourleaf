@@ -58,12 +58,13 @@ export function UsersTable({ users, meId, roles, isOwner }: { users: U[]; meId: 
     <th aria-sort={sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
       <button
         type="button"
-        className="inline-flex items-center gap-1 uppercase hover:text-ink"
+        className={`inline-flex cursor-pointer items-center gap-1 uppercase underline-offset-4 hover:text-ink hover:underline ${sort.key === key ? "text-ink" : ""}`}
         onClick={() => setSort((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }))}
         title={`Sort by ${label.toLowerCase()}`}
       >
         {label}
-        <span className={sort.key === key ? "text-ink" : "text-neutral-300"}>{sort.key === key && sort.dir === "desc" ? "↓" : "↑"}</span>
+        {/* Every sortable column shows ↕; the one in use shows its direction. */}
+        <span aria-hidden className={`text-[13px] leading-none ${sort.key === key ? "text-brand" : "text-neutral-500"}`}>{sort.key !== key ? "↕" : sort.dir === "asc" ? "↑" : "↓"}</span>
       </button>
     </th>
   );
